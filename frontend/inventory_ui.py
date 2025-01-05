@@ -166,14 +166,16 @@ class InventoryApp(QMainWindow):
         self.cargar_inventario()
 
     def generar_codigo(self):
-        """Generar código de barras para el artículo seleccionado por ID."""
+        """Generar código de barras para el artículo seleccionado por ID y enviarlo a la impresora."""
         id_articulo = self.input_id.text()
         if not id_articulo.isdigit():
             QMessageBox.warning(self, "Error", "Por favor, ingresa un ID válido.")
             return
 
-        generar_codigo_desde_db(int(id_articulo))
-        QMessageBox.information(self, "Éxito", f"Código de barras generado para el ID {id_articulo}.")
+        from utils.barcode_utils import imprimir_codigo_barras
+        imprimir_codigo_barras(int(id_articulo))
+        QMessageBox.information(self, "Éxito", f"Código de barras generado e impreso para el ID {id_articulo}.")
+
 
 
 if __name__ == "__main__":
