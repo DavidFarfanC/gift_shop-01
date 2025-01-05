@@ -7,7 +7,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from utils.barcode_utils import generar_codigo_desde_db
 
 from PyQt5.QtWidgets import (
-    QApplication, QMainWindow, QVBoxLayout, QHBoxLayout, QTableWidget, 
+    QApplication, QMainWindow, QVBoxLayout, QHBoxLayout, QTableWidget,
     QTableWidgetItem, QPushButton, QLineEdit, QLabel, QWidget, QMessageBox
 )
 import sqlite3
@@ -27,9 +27,10 @@ class InventoryApp(QMainWindow):
         self.table = QTableWidget()
         self.table.setColumnCount(6)
         self.table.setHorizontalHeaderLabels(["ID", "Nombre", "Descripción", "Cantidad", "Valor Real", "Valor Venta"])
+        self.table.cellClicked.connect(self.cargar_fila_seleccionada)
         layout.addWidget(self.table)
 
-        # Formulario para agregar artículos
+        # Formulario para agregar o editar artículos
         form_layout = QHBoxLayout()
         self.input_nombre = QLineEdit()
         self.input_descripcion = QLineEdit()
@@ -38,6 +39,8 @@ class InventoryApp(QMainWindow):
         self.input_valor_venta = QLineEdit()
         self.btn_agregar = QPushButton("Agregar Artículo")
         self.btn_agregar.clicked.connect(self.agregar_articulo)
+        self.btn_editar = QPushButton("Editar Artículo")
+        self.btn_editar.clicked.connect(self.editar_articulo)
 
         form_layout.addWidget(QLabel("Nombre:"))
         form_layout.addWidget(self.input_nombre)
@@ -50,7 +53,13 @@ class InventoryApp(QMainWindow):
         form_layout.addWidget(QLabel("Valor Venta:"))
         form_layout.addWidget(self.input_valor_venta)
         form_layout.addWidget(self.btn_agregar)
+        form_layout.addWidget(self.btn_editar)
         layout.addLayout(form_layout)
+
+        # Botón para eliminar artículos
+        self.btn_eliminar = QPushButton("Eliminar Artículo")
+        self.btn_eliminar.clicked.connect(self.eliminar_articulo)
+        layout.addWidget(self.btn_eliminar)
 
         # Botón para generar código de barras
         self.input_id = QLineEdit()
@@ -80,6 +89,15 @@ class InventoryApp(QMainWindow):
                 self.table.setItem(row_idx, col_idx, QTableWidgetItem(str(col)))
         conn.close()
 
+    def cargar_fila_seleccionada(self, row):
+        """Cargar datos de la fila seleccionada en los campos de entrada."""
+        self.input_nombre.setText(self.table.item(row, 1).text())
+        self.input_descripcion.setText(self.table.item(row, 2).text())
+        self.input_cantidad.setText(self.table.item(row, 3).text())
+        self.input_valor_real.setText(self.table.item(row, 4).text())
+        self.input_valor_venta.setText(self.table.item(row, 5).text())
+        self.input_id.setText(self.table.item(row, 0).text())
+
     def agregar_articulo(self):
         """Agregar un nuevo artículo a la base de datos."""
         nombre = self.input_nombre.text()
@@ -102,6 +120,49 @@ class InventoryApp(QMainWindow):
         conn.close()
 
         QMessageBox.information(self, "Éxito", "Artículo agregado correctamente.")
+        self.cargar_inventario()
+
+    def editar_articulo(self):
+        """Editar el artículo seleccionado en la base de datos."""
+        id_articulo = self.input_id.text()
+        nombre = self.input_nombre.text()
+        descripcion = self.input_descripcion.text()
+        cantidad = self.input_cantidad.text()
+        valor_real = self.input_valor_real.text()
+        valor_venta = self.input_valor_venta.text()
+
+        if not (id_articulo.isdigit() and nombre and cantidad.isdigit() and valor_real.replace('.', '', 1).isdigit() and valor_venta.replace('.', '', 1).isdigit()):
+            QMessageBox.warning(self, "Error", "Por favor, completa todos los campos correctamente.")
+            return
+
+        conn = sqlite3.connect("db/database.db")
+        cursor = conn.cursor()
+        cursor.execute("""
+        UPDATE inventario
+        SET nombre = ?, descripcion = ?, cantidad = ?, valor_real = ?, valor_venta = ?
+        WHERE id = ?
+        """, (nombre, descripcion, int(cantidad), float(valor_real), float(valor_venta), int(id_articulo)))
+        conn.commit()
+        conn.close()
+
+        QMessageBox.information(self, "Éxito", "Artículo editado correctamente.")
+        self.cargar_inventario()
+
+    def eliminar_articulo(self):
+        """Eliminar el artículo seleccionado de la base de datos."""
+        id_articulo = self.input_id.text()
+
+        if not id_articulo.isdigit():
+            QMessageBox.warning(self, "Error", "Por favor, selecciona un artículo válido para eliminar.")
+            return
+
+        conn = sqlite3.connect("db/database.db")
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM inventario WHERE id = ?", (int(id_articulo),))
+        conn.commit()
+        conn.close()
+
+        QMessageBox.information(self, "Éxito", "Artículo eliminado correctamente.")
         self.cargar_inventario()
 
     def generar_codigo(self):
