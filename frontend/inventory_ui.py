@@ -97,7 +97,7 @@ class InventoryApp(QWidget):
     def cargar_inventario(self):
         """Cargar datos del inventario en la tabla."""
         try:
-            conn = sqlite3.connect("db/database.db")
+            conn = sqlite3.connect("db/store.db")  # Cambiado a store.db
             cursor = conn.cursor()
             cursor.execute("SELECT * FROM inventario")
             datos = cursor.fetchall()
@@ -142,10 +142,10 @@ class InventoryApp(QWidget):
                 raise ValueError("Los valores deben ser números positivos")
 
             # Insertar en la base de datos
-            conn = sqlite3.connect("db/database.db")
+            conn = sqlite3.connect("db/store.db")  # Cambiado a store.db
             cursor = conn.cursor()
             cursor.execute("""
-                INSERT INTO inventario (nombre, descripcion, cantidad, valor_real, valor_venta)
+                INSERT INTO inventario (nombre, descripcion, cantidad, precio_compra, precio_venta)
                 VALUES (?, ?, ?, ?, ?)
             """, (nombre, descripcion, int(cantidad), valor_real, valor_venta))
             
@@ -168,50 +168,59 @@ class InventoryApp(QWidget):
 
     def editar_articulo(self):
         """Editar el artículo seleccionado en la base de datos."""
-        id_articulo = self.input_id.text()
-        nombre = self.input_nombre.text()
-        descripcion = self.input_descripcion.text()
-        cantidad = self.input_cantidad.text()
-        valor_real = self.input_valor_real.text()
-        valor_venta = self.input_valor_venta.text()
+        try:
+            id_articulo = self.input_id.text()
+            nombre = self.input_nombre.text()
+            descripcion = self.input_descripcion.text()
+            cantidad = self.input_cantidad.text()
+            valor_real = self.input_valor_real.text()
+            valor_venta = self.input_valor_venta.text()
 
-        if not (id_articulo.isdigit() and nombre and cantidad.isdigit() 
-                and valor_real.replace('.', '', 1).isdigit() 
-                and valor_venta.replace('.', '', 1).isdigit()):
-            QMessageBox.warning(self, "Error", "Por favor, completa todos los campos correctamente.")
-            return
+            if not (id_articulo.isdigit() and nombre and cantidad.isdigit() 
+                    and valor_real.replace('.', '', 1).isdigit() 
+                    and valor_venta.replace('.', '', 1).isdigit()):
+                QMessageBox.warning(self, "Error", "Por favor, completa todos los campos correctamente.")
+                return
 
-        conn = sqlite3.connect("db/database.db")
-        cursor = conn.cursor()
-        cursor.execute("""
-        UPDATE inventario
-        SET nombre = ?, descripcion = ?, cantidad = ?, valor_real = ?, valor_venta = ?
-        WHERE id = ?
-        """, (nombre, descripcion, int(cantidad), float(valor_real), float(valor_venta), int(id_articulo)))
-        conn.commit()
-        conn.close()
+            conn = sqlite3.connect("db/store.db")  # Cambiado a store.db
+            cursor = conn.cursor()
+            cursor.execute("""
+            UPDATE inventario
+            SET nombre = ?, descripcion = ?, cantidad = ?, precio_compra = ?, precio_venta = ?
+            WHERE id = ?
+            """, (nombre, descripcion, int(cantidad), float(valor_real), float(valor_venta), int(id_articulo)))
+            
+            conn.commit()
+            conn.close()
 
-        QMessageBox.information(self, "Éxito", "Artículo editado correctamente.")
-        self.cargar_inventario()
-        self.limpiar_campos()
+            QMessageBox.information(self, "Éxito", "Artículo editado correctamente.")
+            self.cargar_inventario()
+            self.limpiar_campos()
+            
+        except sqlite3.Error as e:
+            QMessageBox.critical(self, "Error", f"Error en la base de datos: {str(e)}")
 
     def eliminar_articulo(self):
         """Eliminar el artículo seleccionado de la base de datos."""
-        id_articulo = self.input_id.text()
+        try:
+            id_articulo = self.input_id.text()
 
-        if not id_articulo.isdigit():
-            QMessageBox.warning(self, "Error", "Por favor, selecciona un artículo válido para eliminar.")
-            return
+            if not id_articulo.isdigit():
+                QMessageBox.warning(self, "Error", "Por favor, selecciona un artículo válido para eliminar.")
+                return
 
-        conn = sqlite3.connect("db/database.db")
-        cursor = conn.cursor()
-        cursor.execute("DELETE FROM inventario WHERE id = ?", (int(id_articulo),))
-        conn.commit()
-        conn.close()
+            conn = sqlite3.connect("db/store.db")  # Cambiado a store.db
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM inventario WHERE id = ?", (int(id_articulo),))
+            conn.commit()
+            conn.close()
 
-        QMessageBox.information(self, "Éxito", "Artículo eliminado correctamente.")
-        self.cargar_inventario()
-        self.limpiar_campos()
+            QMessageBox.information(self, "Éxito", "Artículo eliminado correctamente.")
+            self.cargar_inventario()
+            self.limpiar_campos()
+            
+        except sqlite3.Error as e:
+            QMessageBox.critical(self, "Error", f"Error en la base de datos: {str(e)}")
 
     def generar_codigo(self):
         """

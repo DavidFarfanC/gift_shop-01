@@ -48,13 +48,13 @@ class LoginWindow(QWidget):
         # Hash de la contraseña
         hashed_password = hashlib.sha256(password.encode()).hexdigest()
 
-        conn = sqlite3.connect("db/database.db")
+        conn = sqlite3.connect("db/store.db")
         cursor = conn.cursor()
         
         cursor.execute("""
             SELECT id, telefono, correo, rol 
             FROM usuarios 
-            WHERE telefono = ? AND password = ? AND activo = 1
+            WHERE telefono = ? AND contrasena = ?
         """, (telefono, hashed_password))
         
         usuario = cursor.fetchone()

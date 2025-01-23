@@ -9,6 +9,7 @@ from PyQt5.QtGui import QFont, QPixmap
 from frontend.login_ui import LoginWindow
 from frontend.inventory_ui import InventoryApp
 from frontend.sales_ui import SalesWindow
+from frontend.layaway_ui import LayawayWindow
 from utils.styles import STYLE_SHEET
 
 class MainWindow(QMainWindow):
@@ -85,10 +86,14 @@ class MainWindow(QMainWindow):
         # Pestaña de ventas
         sales_tab = SalesWindow(self.user_data, self)
 
+        # Pestaña de apartados
+        layaway_tab = LayawayWindow(self.user_data)
+
         # Agregar pestañas
         self.tab_widget.addTab(home_tab, "Inicio")
         self.tab_widget.addTab(inventory_tab, "Inventario")
         self.tab_widget.addTab(sales_tab, "Ventas")
+        self.tab_widget.addTab(layaway_tab, "Apartados")
 
         main_layout.addWidget(self.tab_widget)
 
