@@ -1,7 +1,7 @@
 from PyQt5.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
     QLineEdit, QPushButton, QComboBox, QTableWidget, 
-    QTableWidgetItem, QMessageBox, QTabWidget, QDateEdit
+    QTableWidgetItem, QMessageBox, QTabWidget, QDateEdit, QHeaderView
 )
 from PyQt5.QtCore import Qt, QDate
 import sqlite3
@@ -12,15 +12,17 @@ class SalesWindow(QMainWindow):
         super().__init__(parent)
         self.user_data = user_data
         self.parent = parent
-        self.setWindowTitle("Sistema de Ventas")
-        self.setGeometry(150, 150, 1000, 700)
+        self.setup_ui()
 
-        # Widget principal
-        main_widget = QWidget()
-        self.setCentralWidget(main_widget)
-        layout = QVBoxLayout(main_widget)
+    def setup_ui(self):
+        # Widget central
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
+        layout = QVBoxLayout(central_widget)
+        layout.setSpacing(20)
+        layout.setContentsMargins(20, 20, 20, 20)
 
-        # Crear el widget de pestañas
+        # Crear el widget de pestañas con estilo
         tabs = QTabWidget()
         
         # Pestaña de Registro de Ventas
@@ -36,11 +38,14 @@ class SalesWindow(QMainWindow):
         layout.addWidget(tabs)
 
     def setup_tab_ventas(self, tab):
-        """Configurar la pestaña de registro de ventas"""
         layout = QVBoxLayout(tab)
+        layout.setSpacing(15)
         
-        # Campo para código de barras/ID y botón buscar
-        id_layout = QHBoxLayout()
+        # Sección de búsqueda
+        search_widget = QWidget()
+        search_layout = QHBoxLayout(search_widget)
+        search_layout.setSpacing(10)
+        
         self.id_input = QLineEdit()
         self.id_input.setPlaceholderText("Escanea o ingresa el ID del producto")
         self.id_input.returnPressed.connect(self.buscar_producto)
@@ -48,53 +53,61 @@ class SalesWindow(QMainWindow):
         self.btn_buscar = QPushButton("Buscar")
         self.btn_buscar.clicked.connect(self.buscar_producto)
         
-        id_layout.addWidget(QLabel("ID Producto:"))
-        id_layout.addWidget(self.id_input)
-        id_layout.addWidget(self.btn_buscar)
-        layout.addLayout(id_layout)
+        search_layout.addWidget(QLabel("ID Producto:"))
+        search_layout.addWidget(self.id_input)
+        search_layout.addWidget(self.btn_buscar)
+        layout.addWidget(search_widget)
         
         # Información del producto
         self.info_producto = QLabel("")
+        self.info_producto.setObjectName("info_producto")
         layout.addWidget(self.info_producto)
         
-        # Campos de venta
-        form_layout = QHBoxLayout()
+        # Formulario de venta
+        form_widget = QWidget()
+        form_layout = QHBoxLayout(form_widget)
+        form_layout.setSpacing(15)
         
-        # Campo cantidad
         self.cantidad_input = QLineEdit()
         self.cantidad_input.setPlaceholderText("Cantidad")
-        form_layout.addWidget(QLabel("Cantidad:"))
-        form_layout.addWidget(self.cantidad_input)
         
-        # Forma de pago
         self.forma_pago = QComboBox()
         self.forma_pago.addItems(["efectivo", "tarjeta"])
-        form_layout.addWidget(QLabel("Forma de Pago:"))
-        form_layout.addWidget(self.forma_pago)
         
-        # Botón agregar
         self.btn_agregar = QPushButton("Agregar a Venta")
         self.btn_agregar.clicked.connect(self.agregar_a_venta)
+        
+        form_layout.addWidget(QLabel("Cantidad:"))
+        form_layout.addWidget(self.cantidad_input)
+        form_layout.addWidget(QLabel("Forma de Pago:"))
+        form_layout.addWidget(self.forma_pago)
         form_layout.addWidget(self.btn_agregar)
         
-        layout.addLayout(form_layout)
+        layout.addWidget(form_widget)
         
-        # Tabla de productos en la venta actual
+        # Tabla de venta actual
         self.tabla_venta = QTableWidget()
         self.tabla_venta.setColumnCount(5)
         self.tabla_venta.setHorizontalHeaderLabels([
             "ID", "Nombre", "Cantidad", "Precio Unitario", "Subtotal"
         ])
+        header = self.tabla_venta.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.Stretch)
         layout.addWidget(self.tabla_venta)
         
-        # Total y botón finalizar
-        total_layout = QHBoxLayout()
+        # Total y finalizar
+        footer_widget = QWidget()
+        footer_layout = QHBoxLayout(footer_widget)
+        
         self.lbl_total = QLabel("Total: $0.00")
+        self.lbl_total.setObjectName("total")
+        
         self.btn_finalizar = QPushButton("Finalizar Venta")
         self.btn_finalizar.clicked.connect(self.finalizar_venta)
-        total_layout.addWidget(self.lbl_total)
-        total_layout.addWidget(self.btn_finalizar)
-        layout.addLayout(total_layout)
+        
+        footer_layout.addWidget(self.lbl_total)
+        footer_layout.addWidget(self.btn_finalizar)
+        layout.addWidget(footer_widget)
         
         # Variables de control
         self.productos_en_venta = []

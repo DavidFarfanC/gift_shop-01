@@ -1,119 +1,111 @@
 import sys
+import os
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, 
-    QPushButton, QLabel, QGridLayout
+    QLabel, QTabWidget, QStyleFactory, QMessageBox
 )
 from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QFont, QIcon
+from PyQt5.QtGui import QFont, QPixmap
 from frontend.login_ui import LoginWindow
 from frontend.inventory_ui import InventoryApp
 from frontend.sales_ui import SalesWindow
+from utils.styles import STYLE_SHEET
 
-class MainMenu(QMainWindow):
+class MainWindow(QMainWindow):
     def __init__(self, user_data):
         super().__init__()
         self.user_data = user_data
+        self.setStyleSheet(STYLE_SHEET)
         self.setup_ui()
 
     def setup_ui(self):
-        self.setWindowTitle("Sistema de Gestión - Menú Principal")
-        self.setGeometry(100, 100, 800, 600)
-        self.setStyleSheet("""
-            QMainWindow {
-                background-color: #f0f0f0;
-            }
-            QPushButton {
-                background-color: #2c3e50;
-                color: white;
-                border: none;
-                padding: 15px;
-                border-radius: 5px;
-                font-size: 14px;
-                min-width: 200px;
-                margin: 5px;
-            }
-            QPushButton:hover {
-                background-color: #34495e;
-            }
-            QLabel {
-                color: #2c3e50;
-                font-size: 16px;
-            }
-        """)
+        self.setWindowTitle("W Gift Shop - Sistema de Gestión")
+        self.setGeometry(50, 50, 1200, 800)
 
         # Widget central
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         layout = QVBoxLayout(central_widget)
-        layout.setAlignment(Qt.AlignCenter)
+        layout.setSpacing(20)
+        layout.setContentsMargins(20, 20, 20, 20)
+
+        # Logo
+        logo_label = QLabel()
+        logo_label.setObjectName("logo")
+        
+        # Intentar diferentes rutas para el logo
+        possible_paths = [
+            "assets/logo.png",
+            "./assets/logo.png",
+            "../assets/logo.png",
+            os.path.join(os.path.dirname(__file__), "assets/logo.png")
+        ]
+        
+        logo_loaded = False
+        for path in possible_paths:
+            if os.path.exists(path):
+                pixmap = QPixmap(path)
+                if not pixmap.isNull():
+                    scaled_pixmap = pixmap.scaled(150, 150, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                    logo_label.setPixmap(scaled_pixmap)
+                    logo_loaded = True
+                    print(f"Logo cargado exitosamente desde: {path}")
+                    break
+        
+        if not logo_loaded:
+            print("No se pudo cargar el logo. Rutas intentadas:", possible_paths)
+            print("Directorio actual:", os.getcwd())
+            logo_label.setText("W Gift Shop")
+            logo_label.setStyleSheet("""
+                QLabel {
+                    font-size: 24px;
+                    font-weight: bold;
+                    color: #9B8989;
+                    padding: 20px;
+                }
+            """)
+
+        logo_label.setAlignment(Qt.AlignCenter)
+        layout.addWidget(logo_label)
 
         # Título y bienvenida
-        title = QLabel("Sistema de Gestión")
-        title.setFont(QFont('Arial', 24, QFont.Bold))
-        title.setAlignment(Qt.AlignCenter)
-        layout.addWidget(title)
-
         welcome = QLabel(f"Bienvenido, {self.user_data['rol'].title()}")
+        welcome.setObjectName("welcome")
         welcome.setAlignment(Qt.AlignCenter)
         layout.addWidget(welcome)
 
-        # Grid para botones
-        button_grid = QGridLayout()
-        button_grid.setSpacing(20)
+        # Sistema de pestañas
+        self.tab_widget = QTabWidget()
+        self.tab_widget.setStyle(QStyleFactory.create('Fusion'))
 
-        # Botones
-        btn_inventory = QPushButton("Gestión de Inventario")
-        btn_inventory.clicked.connect(self.open_inventory)
-        btn_inventory.setIcon(QIcon('icons/inventory.png'))  # Agregar ícono si lo tienes
-
-        btn_sales = QPushButton("Ventas")
-        btn_sales.clicked.connect(self.open_sales)
-        btn_sales.setIcon(QIcon('icons/sales.png'))
-
-        btn_reports = QPushButton("Reportes")
-        btn_reports.clicked.connect(self.open_reports)
-        btn_reports.setIcon(QIcon('icons/reports.png'))
-
-        btn_settings = QPushButton("Configuración")
-        btn_settings.clicked.connect(self.open_settings)
-        btn_settings.setIcon(QIcon('icons/settings.png'))
-
-        # Agregar botones al grid
-        button_grid.addWidget(btn_inventory, 0, 0)
-        button_grid.addWidget(btn_sales, 0, 1)
-        button_grid.addWidget(btn_reports, 1, 0)
-        button_grid.addWidget(btn_settings, 1, 1)
-
-        layout.addLayout(button_grid)
-
+        # Pestaña de inicio
+        home_tab = QWidget()
+        home_layout = QVBoxLayout(home_tab)
+        
         # Información del usuario
         user_info = QLabel(f"Usuario: {self.user_data['telefono']} | Correo: {self.user_data['correo']}")
         user_info.setAlignment(Qt.AlignCenter)
-        layout.addWidget(user_info)
+        home_layout.addWidget(user_info)
 
-    def open_inventory(self):
-        self.inventory_window = InventoryApp(self.user_data)
-        self.inventory_window.show()
+        # Pestaña de inventario
+        inventory_tab = InventoryApp(self.user_data)
+        
+        # Pestaña de ventas
+        sales_tab = SalesWindow(self.user_data, self)
 
-    def open_sales(self):
-        self.sales_window = SalesWindow(self.user_data, self)
-        self.sales_window.show()
+        # Agregar pestañas
+        self.tab_widget.addTab(home_tab, "Inicio")
+        self.tab_widget.addTab(inventory_tab, "Inventario")
+        self.tab_widget.addTab(sales_tab, "Ventas")
 
-    def open_reports(self):
-        # Por implementar
-        pass
-
-    def open_settings(self):
-        # Por implementar
-        pass
+        layout.addWidget(self.tab_widget)
 
 class MainApplication:
     def __init__(self):
         self.app = QApplication(sys.argv)
         self.login_window = LoginWindow()
-        self.main_menu = None
+        self.main_window = None
         
-        # Conectar señal de login exitoso
         self.login_window.login_successful.connect(self.on_login_successful)
         
         self.login_window.show()
@@ -121,8 +113,8 @@ class MainApplication:
     
     def on_login_successful(self, user_data):
         self.login_window.close()
-        self.main_menu = MainMenu(user_data)
-        self.main_menu.show()
+        self.main_window = MainWindow(user_data)
+        self.main_window.show()
 
 if __name__ == "__main__":
     MainApplication()
