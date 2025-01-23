@@ -217,53 +217,53 @@ class LayawayWindow(QWidget):
         self.load_historial()
 
     def load_clients_table(self):
+        conn = None
+        conn_movements = None
         try:
-            conn = sqlite3.connect("db/store.db")
-            cursor = conn.cursor()
-            
-            # Primero obtenemos los clientes
-            cursor.execute("""
-                SELECT 
-                    id, nombre, telefono, correo, fecha_registro
-                FROM clientes
-                ORDER BY nombre
-            """)
-            
-            clients = cursor.fetchall()
-            self.clients_table.setRowCount(len(clients))
-            
-            # Conectamos a la base de datos de movements para contar apartados
-            conn_movements = sqlite3.connect("db/movements.db")
-            cursor_movements = conn_movements.cursor()
-            
-            for row, client in enumerate(clients):
-                # Obtener cantidad de apartados activos para este cliente
-                cursor_movements.execute("""
-                    SELECT COUNT(*) 
-                    FROM apartados 
-                    WHERE cliente_telefono = ? 
-                    AND estado = 'pendiente'
-                """, (client[2],))  # client[2] es el teléfono
+            # Usar with para manejar las conexiones automáticamente
+            with sqlite3.connect("db/store.db") as conn:
+                cursor = conn.cursor()
                 
-                apartados_count = cursor_movements.fetchone()[0]
+                # Primero obtenemos los clientes
+                cursor.execute("""
+                    SELECT 
+                        id, nombre, telefono, correo, fecha_registro
+                    FROM clientes
+                    ORDER BY nombre
+                """)
                 
-                # Mostrar datos en la tabla
-                for col, value in enumerate(client):
-                    if col == 4:  # Fecha
-                        text = value.split()[0] if value else ''  # Solo la fecha, sin hora
-                    else:
-                        text = str(value)
-                    item = QTableWidgetItem(text)
-                    item.setTextAlignment(Qt.AlignCenter)
-                    self.clients_table.setItem(row, col, item)
+                clients = cursor.fetchall()
+                self.clients_table.setRowCount(len(clients))
                 
-                # Agregar contador de apartados
-                item = QTableWidgetItem(str(apartados_count))
-                item.setTextAlignment(Qt.AlignCenter)
-                self.clients_table.setItem(row, 5, item)
-            
-            conn.close()
-            conn_movements.close()
+                # Usar with para la segunda conexión
+                with sqlite3.connect("db/movements.db") as conn_movements:
+                    cursor_movements = conn_movements.cursor()
+                    
+                    for row, client in enumerate(clients):
+                        # Obtener cantidad de apartados activos para este cliente
+                        cursor_movements.execute("""
+                            SELECT COUNT(*) 
+                            FROM apartados 
+                            WHERE cliente_telefono = ? 
+                            AND estado = 'pendiente'
+                        """, (client[2],))  # client[2] es el teléfono
+                        
+                        apartados_count = cursor_movements.fetchone()[0]
+                        
+                        # Mostrar datos en la tabla
+                        for col, value in enumerate(client):
+                            if col == 4:  # Fecha
+                                text = value.split()[0] if value else ''
+                            else:
+                                text = str(value)
+                            item = QTableWidgetItem(text)
+                            item.setTextAlignment(Qt.AlignCenter)
+                            self.clients_table.setItem(row, col, item)
+                        
+                        # Agregar contador de apartados
+                        item = QTableWidgetItem(str(apartados_count))
+                        item.setTextAlignment(Qt.AlignCenter)
+                        self.clients_table.setItem(row, 5, item)
             
         except sqlite3.Error as e:
             QMessageBox.critical(self, "Error", f"Error al cargar clientes: {str(e)}")
@@ -303,7 +303,11 @@ class LayawayWindow(QWidget):
     def show_new_client_dialog(self):
         dialog = ClientDialog(self)
         if dialog.exec_() == QDialog.Accepted:
-            self.load_layaways()
+            # Recargar la tabla de clientes inmediatamente
+            self.load_clients_table()
+            # Si estamos en la pestaña de apartados, actualizar el combo de clientes
+            if hasattr(self, 'client_combo'):
+                self.load_clients_combo()
 
     def show_new_layaway_dialog(self):
         dialog = LayawayDialog(self.user_data)
@@ -312,40 +316,39 @@ class LayawayWindow(QWidget):
 
     def load_layaways(self):
         try:
-            conn = sqlite3.connect("db/movements.db")
-            cursor = conn.cursor()
-            
-            cursor.execute("""
-                SELECT 
-                    id, cliente_nombre, cliente_telefono,
-                    articulo_nombre, cantidad, precio_total,
-                    anticipo, restante,
-                    CASE 
-                        WHEN estado = 'pendiente' THEN 'Por Pagar'
-                        WHEN estado = 'completado' THEN 'Pagado'
-                        WHEN estado = 'cancelado' THEN 'Cancelado'
-                    END as estado_pago,
-                    fecha_limite
-                FROM apartados
-                ORDER BY fecha_creacion DESC
-            """)
-            
-            apartados = cursor.fetchall()
-            self.layaway_table.setRowCount(len(apartados))
-            
-            for row, apartado in enumerate(apartados):
-                for col, value in enumerate(apartado):
-                    if col in [5, 6, 7]:  # Valores monetarios
-                        text = f"${value:.2f}"
-                    elif col == 9:  # Fecha límite
-                        text = value.split()[0] if value else ''  # Solo la fecha
-                    else:
-                        text = str(value)
-                    item = QTableWidgetItem(text)
-                    item.setTextAlignment(Qt.AlignCenter)
-                    self.layaway_table.setItem(row, col, item)
-            
-            conn.close()
+            # Usar with para manejar la conexión automáticamente
+            with sqlite3.connect("db/movements.db") as conn:
+                cursor = conn.cursor()
+                
+                cursor.execute("""
+                    SELECT 
+                        id, cliente_nombre, cliente_telefono,
+                        articulo_nombre, cantidad, precio_total,
+                        anticipo, restante,
+                        CASE 
+                            WHEN estado = 'pendiente' THEN 'Por Pagar'
+                            WHEN estado = 'completado' THEN 'Pagado'
+                            WHEN estado = 'cancelado' THEN 'Cancelado'
+                        END as estado_pago,
+                        fecha_limite
+                    FROM apartados
+                    ORDER BY fecha_creacion DESC
+                """)
+                
+                apartados = cursor.fetchall()
+                self.layaway_table.setRowCount(len(apartados))
+                
+                for row, apartado in enumerate(apartados):
+                    for col, value in enumerate(apartado):
+                        if col in [5, 6, 7]:  # Valores monetarios
+                            text = f"${value:.2f}"
+                        elif col == 9:  # Fecha límite
+                            text = value.split()[0] if value else ''
+                        else:
+                            text = str(value)
+                        item = QTableWidgetItem(text)
+                        item.setTextAlignment(Qt.AlignCenter)
+                        self.layaway_table.setItem(row, col, item)
             
         except sqlite3.Error as e:
             QMessageBox.critical(self, "Error", f"Error al cargar apartados: {str(e)}")
@@ -475,6 +478,8 @@ class ClientDialog(QDialog):
         super().__init__(parent)
         self.client_id = client_id
         self.setup_ui()
+        if client_id:
+            self.load_client_data()
 
     def setup_ui(self):
         self.setWindowTitle("Nuevo Cliente")
@@ -566,6 +571,114 @@ class ClientDialog(QDialog):
             QMessageBox.warning(self, "Error", str(e))
         except sqlite3.Error as e:
             QMessageBox.critical(self, "Error", f"Error en la base de datos: {str(e)}")
+
+    def load_client_data(self):
+        conn = sqlite3.connect("db/store.db")
+        cursor = conn.cursor()
+        
+        cursor.execute("SELECT nombre, telefono, correo, notas FROM clientes WHERE id = ?", (self.client_id,))
+        client_data = cursor.fetchone()
+        
+        conn.close()
+        
+        if client_data:
+            self.nombre.setText(client_data[0])
+            self.telefono.setText(client_data[1])
+            self.correo.setText(client_data[2])
+            self.notas.setText(client_data[3])
+
+    def accept(self):
+        try:
+            # Obtener valores
+            nombre = self.nombre.text().strip()
+            telefono = self.telefono.text().strip()
+            correo = self.correo.text().strip()
+            notas = self.notas.toPlainText().strip()
+            
+            # Validaciones
+            if not nombre:
+                raise ValueError("El nombre es obligatorio")
+            if not telefono:
+                raise ValueError("El teléfono es obligatorio")
+            
+            conn = sqlite3.connect("db/store.db")
+            cursor = conn.cursor()
+            
+            if self.client_id:  # Editar cliente existente
+                cursor.execute("""
+                    UPDATE clientes 
+                    SET nombre = ?, telefono = ?, correo = ?, notas = ?
+                    WHERE id = ?
+                """, (nombre, telefono, correo, notas, self.client_id))
+            else:  # Nuevo cliente
+                cursor.execute("""
+                    INSERT INTO clientes (nombre, telefono, correo, notas)
+                    VALUES (?, ?, ?, ?)
+                """, (nombre, telefono, correo, notas))
+            
+            conn.commit()
+            conn.close()
+            
+            # Notificar éxito
+            QMessageBox.information(
+                self, 
+                "Éxito", 
+                "Cliente guardado correctamente"
+            )
+            
+            # Cerrar el diálogo con éxito
+            super().accept()
+            
+            # Forzar actualización de la vista principal
+            if self.parent():
+                self.parent().load_clients_table()
+                if hasattr(self.parent(), 'client_combo'):
+                    self.parent().load_clients_combo()
+            
+        except ValueError as e:
+            QMessageBox.warning(self, "Error", str(e))
+        except sqlite3.IntegrityError:
+            QMessageBox.warning(
+                self, 
+                "Error", 
+                "Ya existe un cliente con ese teléfono"
+            )
+        except sqlite3.Error as e:
+            QMessageBox.critical(
+                self, 
+                "Error", 
+                f"Error en la base de datos: {str(e)}"
+            )
+
+    def load_clients_combo(self):
+        try:
+            conn = sqlite3.connect("db/store.db")
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                SELECT id, nombre, telefono 
+                FROM clientes 
+                ORDER BY nombre
+            """)
+            
+            clients = cursor.fetchall()
+            self.client_combo.clear()
+            self.client_combo.addItem("Seleccione un cliente", None)
+            
+            self.clients_data = {}
+            for client in clients:
+                client_id, nombre, telefono = client
+                self.clients_data[client_id] = {
+                    "id": client_id,
+                    "nombre": nombre,
+                    "telefono": telefono
+                }
+                self.client_combo.addItem(f"{nombre} - {telefono}", client_id)
+            
+            conn.close()
+            
+        except sqlite3.Error as e:
+            QMessageBox.critical(self, "Error", f"Error al cargar clientes: {str(e)}")
 
 class LayawayDialog(QDialog):
     def __init__(self, user_data):
@@ -795,10 +908,6 @@ class LayawayDialog(QDialog):
             self.restante_label.setText(f"Restante: ${max(total - anticipo, 0):.2f}")
 
     def save_layaway(self):
-        if not self.current_client:
-            QMessageBox.warning(self, "Error", "Debe seleccionar un cliente")
-            return
-            
         try:
             cantidad = self.cantidad.value()
             total = self.current_item["precio"] * cantidad
@@ -807,51 +916,38 @@ class LayawayDialog(QDialog):
             if anticipo < total * 0.20:  # Mínimo 20% de anticipo
                 raise ValueError("El anticipo debe ser al menos el 20% del total")
             
-            # Verificar stock disponible
-            conn_store = sqlite3.connect("db/store.db")
-            cursor_store = conn_store.cursor()
-            
-            cursor_store.execute("""
-                SELECT cantidad 
-                FROM inventario 
-                WHERE id = ?
-            """, (self.current_item["id"],))
-            
-            stock_actual = cursor_store.fetchone()[0]
-            
-            if stock_actual < cantidad:
-                conn_store.close()
-                raise ValueError(f"Stock insuficiente. Solo hay {stock_actual} unidades disponibles")
-            
-            # Iniciar transacción
-            conn_movements = sqlite3.connect("db/movements.db")
-            cursor_movements = conn_movements.cursor()
-            
-            try:
-                # 1. Registrar el apartado
+            # Usar with para ambas conexiones
+            with sqlite3.connect("db/store.db") as conn_store, \
+                 sqlite3.connect("db/movements.db") as conn_movements:
+                
+                cursor_store = conn_store.cursor()
+                cursor_movements = conn_movements.cursor()
+                
+                # Verificar stock
+                cursor_store.execute("""
+                    SELECT cantidad 
+                    FROM inventario 
+                    WHERE id = ?
+                """, (self.current_item["id"],))
+                
+                stock_actual = cursor_store.fetchone()[0]
+                
+                if stock_actual < cantidad:
+                    raise ValueError(f"Stock insuficiente. Solo hay {stock_actual} unidades disponibles")
+                
+                # Registrar apartado
                 cursor_movements.execute("""
                     INSERT INTO apartados (
-                        fecha_creacion,
-                        fecha_limite,
-                        cliente_nombre,
-                        cliente_telefono,
-                        cliente_correo,
-                        articulo_id,
-                        articulo_nombre,
-                        cantidad,
-                        precio_total,
-                        anticipo,
-                        restante,
-                        estado,
-                        usuario_id,
-                        notas
+                        fecha_creacion, fecha_limite,
+                        cliente_nombre, cliente_telefono, cliente_correo,
+                        articulo_id, articulo_nombre, cantidad,
+                        precio_total, anticipo, restante,
+                        estado, usuario_id, notas
                     ) VALUES (
                         CURRENT_TIMESTAMP,
                         date('now', '+30 days'),
                         ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                        'pendiente',
-                        ?,
-                        ?
+                        'pendiente', ?, ?
                     )
                 """, (
                     self.current_client["nombre"],
@@ -867,16 +963,14 @@ class LayawayDialog(QDialog):
                     self.notas.toPlainText()
                 ))
                 
-                # 2. Actualizar el inventario
+                # Actualizar inventario
                 cursor_store.execute("""
                     UPDATE inventario 
                     SET cantidad = cantidad - ? 
                     WHERE id = ?
                 """, (cantidad, self.current_item["id"]))
                 
-                # Confirmar ambas transacciones
-                conn_movements.commit()
-                conn_store.commit()
+                # Los commits se hacen automáticamente al salir del with
                 
                 QMessageBox.information(
                     self, 
@@ -886,17 +980,6 @@ class LayawayDialog(QDialog):
                 )
                 self.accept()
                 
-            except Exception as e:
-                # Si algo falla, revertir ambas transacciones
-                conn_movements.rollback()
-                conn_store.rollback()
-                raise e
-                
-            finally:
-                # Cerrar conexiones
-                conn_movements.close()
-                conn_store.close()
-            
         except ValueError as e:
             QMessageBox.warning(self, "Error", str(e))
         except sqlite3.Error as e:

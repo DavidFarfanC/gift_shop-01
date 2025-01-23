@@ -4,7 +4,7 @@ from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QVBoxLayout, QHBoxLayout, QTableWidget,
     QTableWidgetItem, QPushButton, QLineEdit, QLabel, QWidget, QMessageBox, 
     QHeaderView, QFrame, QGroupBox, QFormLayout, QSpinBox, QDoubleSpinBox,
-    QTextEdit, QComboBox, QDateEdit, QFileDialog, QTabWidget
+    QTextEdit, QComboBox, QDateEdit, QFileDialog, QTabWidget, QDialog, QDialogButtonBox
 )
 from PyQt5.QtGui import QPalette, QColor
 from PyQt5.QtCore import Qt, QDate
@@ -41,13 +41,26 @@ class InventoryApp(QWidget):
     def setup_inventario_tab(self):
         layout = QVBoxLayout(self.tab_inventario)
         
-        # Botones y campos existentes
+        # Botones superiores
+        button_layout = QHBoxLayout()
+        
+        btn_agregar = QPushButton("Agregar Artículo")
+        btn_agregar.clicked.connect(self.agregar_articulo)
+        btn_editar = QPushButton("Editar Artículo")
+        btn_editar.clicked.connect(self.mostrar_editar_articulo)
+        
+        button_layout.addWidget(btn_agregar)
+        button_layout.addWidget(btn_editar)
+        button_layout.addStretch()
+        
+        layout.addLayout(button_layout)
+        
+        # Campos de entrada
         input_layout = QHBoxLayout()
         self.input_widgets = {}
         
         for label in ["Nombre:", "Descripción:", "Cantidad:", 
-                     "Valor Real:", "Valor Venta:", "Categoría:", 
-                     "Código de Barras:"]:
+                     "Valor Real:", "Valor Venta:", "Categoría:"]:
             input_group = QVBoxLayout()
             input_group.addWidget(QLabel(label))
             input_widget = QLineEdit()
@@ -57,14 +70,7 @@ class InventoryApp(QWidget):
         
         layout.addLayout(input_layout)
         
-        button_layout = QHBoxLayout()
-        btn_agregar = QPushButton("Agregar Artículo")
-        btn_agregar.clicked.connect(self.agregar_articulo)
-        button_layout.addWidget(btn_agregar)
-        
-        layout.addLayout(button_layout)
-        
-        # Tabla de inventario activo
+        # Tabla de inventario
         self.tabla_inventario = QTableWidget()
         self.tabla_inventario.setColumnCount(10)
         self.tabla_inventario.setHorizontalHeaderLabels([
@@ -72,6 +78,10 @@ class InventoryApp(QWidget):
             "Precio Compra", "Precio Venta", "Categoría",
             "Código Barras", "Fecha Creación", "Creado por"
         ])
+        
+        # Permitir selección de fila completa
+        self.tabla_inventario.setSelectionBehavior(QTableWidget.SelectRows)
+        self.tabla_inventario.setSelectionMode(QTableWidget.SingleSelection)
         
         header = self.tabla_inventario.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.ResizeToContents)
@@ -323,7 +333,6 @@ class InventoryApp(QWidget):
             valor_real = self.input_widgets["Valor Real:"].text()
             valor_venta = self.input_widgets["Valor Venta:"].text()
             categoria = self.input_widgets["Categoría:"].text().strip()
-            codigo_barras = self.input_widgets["Código de Barras:"].text().strip()
 
             # Validaciones
             if not nombre:
@@ -342,19 +351,31 @@ class InventoryApp(QWidget):
             conn = sqlite3.connect("db/store.db")
             cursor = conn.cursor()
             
+            # Primero insertamos sin código de barras para obtener el ID
             cursor.execute("""
                 INSERT INTO inventario (
                     nombre, descripcion, cantidad, 
                     precio_compra, precio_venta, 
-                    categoria, codigo_barras,
-                    usuario_creacion
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    categoria, usuario_creacion
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
             """, (
                 nombre, descripcion, int(cantidad),
                 valor_real, valor_venta,
-                categoria, codigo_barras,
-                self.user_data['id']  # ID del usuario actual
+                categoria, self.user_data['id']
             ))
+            
+            # Obtener el ID del artículo recién insertado
+            articulo_id = cursor.lastrowid
+            
+            # Generar código de barras basado en el ID
+            codigo_barras = f"{articulo_id:03d}"  # Formato: 001, 002, etc.
+            
+            # Actualizar el artículo con el código de barras
+            cursor.execute("""
+                UPDATE inventario 
+                SET codigo_barras = ? 
+                WHERE id = ?
+            """, (codigo_barras, articulo_id))
             
             conn.commit()
             conn.close()
@@ -365,12 +386,28 @@ class InventoryApp(QWidget):
             
             self.cargar_inventario()
             
-            QMessageBox.information(self, "Éxito", "Artículo agregado correctamente")
+            QMessageBox.information(
+                self, 
+                "Éxito", 
+                f"Artículo agregado correctamente\nCódigo de barras asignado: {codigo_barras}"
+            )
             
         except ValueError as e:
             QMessageBox.warning(self, "Error", str(e))
         except sqlite3.Error as e:
             QMessageBox.critical(self, "Error", f"Error en la base de datos: {str(e)}")
+
+    def mostrar_editar_articulo(self):
+        # Obtener la fila seleccionada
+        current_row = self.tabla_inventario.currentRow()
+        if current_row < 0:
+            QMessageBox.warning(self, "Error", "Por favor seleccione un artículo para editar")
+            return
+        
+        # Crear diálogo de edición
+        dialog = EditarArticuloDialog(self, self.tabla_inventario, current_row)
+        if dialog.exec_() == QDialog.Accepted:
+            self.cargar_inventario()
 
     def editar_articulo(self):
         """Editar el artículo seleccionado en la base de datos."""
@@ -454,6 +491,115 @@ class InventoryApp(QWidget):
         from frontend.sales_ui import SalesWindow
         self.ventana_ventas = SalesWindow(user_data=self.user_data, parent=self)
         self.ventana_ventas.show()
+
+
+class EditarArticuloDialog(QDialog):
+    def __init__(self, parent, tabla, row):
+        super().__init__(parent)
+        self.tabla = tabla
+        self.row = row
+        self.setup_ui()
+        self.cargar_datos()
+
+    def setup_ui(self):
+        self.setWindowTitle("Editar Artículo")
+        self.setMinimumWidth(400)
+        layout = QVBoxLayout(self)
+        
+        # Formulario
+        form_layout = QFormLayout()
+        
+        # ID y código de barras (no editables)
+        self.id_input = QLineEdit()
+        self.id_input.setReadOnly(True)
+        form_layout.addRow("ID:", self.id_input)
+        
+        self.codigo_barras_input = QLineEdit()
+        self.codigo_barras_input.setReadOnly(True)
+        form_layout.addRow("Código Barras:", self.codigo_barras_input)
+        
+        # Campos editables
+        self.nombre_input = QLineEdit()
+        self.descripcion_input = QLineEdit()
+        self.cantidad_input = QSpinBox()
+        self.cantidad_input.setMaximum(99999)
+        self.precio_compra_input = QDoubleSpinBox()
+        self.precio_compra_input.setMaximum(999999.99)
+        self.precio_compra_input.setDecimals(2)
+        self.precio_venta_input = QDoubleSpinBox()
+        self.precio_venta_input.setMaximum(999999.99)
+        self.precio_venta_input.setDecimals(2)
+        self.categoria_input = QLineEdit()
+        
+        form_layout.addRow("Nombre:", self.nombre_input)
+        form_layout.addRow("Descripción:", self.descripcion_input)
+        form_layout.addRow("Cantidad:", self.cantidad_input)
+        form_layout.addRow("Precio Compra:", self.precio_compra_input)
+        form_layout.addRow("Precio Venta:", self.precio_venta_input)
+        form_layout.addRow("Categoría:", self.categoria_input)
+        
+        layout.addLayout(form_layout)
+        
+        # Botones
+        button_box = QDialogButtonBox(
+            QDialogButtonBox.Ok | QDialogButtonBox.Cancel
+        )
+        button_box.accepted.connect(self.guardar_cambios)
+        button_box.rejected.connect(self.reject)
+        layout.addWidget(button_box)
+
+    def cargar_datos(self):
+        # Cargar datos de la fila seleccionada
+        self.id_input.setText(self.tabla.item(self.row, 0).text())
+        self.nombre_input.setText(self.tabla.item(self.row, 1).text())
+        self.descripcion_input.setText(self.tabla.item(self.row, 2).text())
+        self.cantidad_input.setValue(int(self.tabla.item(self.row, 3).text()))
+        self.precio_compra_input.setValue(float(self.tabla.item(self.row, 4).text().replace('$', '')))
+        self.precio_venta_input.setValue(float(self.tabla.item(self.row, 5).text().replace('$', '')))
+        self.categoria_input.setText(self.tabla.item(self.row, 6).text())
+        self.codigo_barras_input.setText(self.tabla.item(self.row, 7).text())
+
+    def guardar_cambios(self):
+        try:
+            # Validaciones
+            if not self.nombre_input.text().strip():
+                raise ValueError("El nombre no puede estar vacío")
+            
+            # Actualizar en la base de datos
+            conn = sqlite3.connect("db/store.db")
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                UPDATE inventario 
+                SET nombre = ?,
+                    descripcion = ?,
+                    cantidad = ?,
+                    precio_compra = ?,
+                    precio_venta = ?,
+                    categoria = ?,
+                    codigo_barras = ?
+                WHERE id = ?
+            """, (
+                self.nombre_input.text().strip(),
+                self.descripcion_input.text().strip(),
+                self.cantidad_input.value(),
+                self.precio_compra_input.value(),
+                self.precio_venta_input.value(),
+                self.categoria_input.text().strip(),
+                self.codigo_barras_input.text().strip(),
+                int(self.id_input.text())
+            ))
+            
+            conn.commit()
+            conn.close()
+            
+            QMessageBox.information(self, "Éxito", "Artículo actualizado correctamente")
+            self.accept()
+            
+        except ValueError as e:
+            QMessageBox.warning(self, "Error", str(e))
+        except sqlite3.Error as e:
+            QMessageBox.critical(self, "Error", f"Error en la base de datos: {str(e)}")
 
 
 if __name__ == "__main__":
