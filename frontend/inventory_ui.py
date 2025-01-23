@@ -529,14 +529,25 @@ class EditarArticuloDialog(QDialog):
         self.precio_venta_input = QDoubleSpinBox()
         self.precio_venta_input.setMaximum(999999.99)
         self.precio_venta_input.setDecimals(2)
-        self.categoria_input = QLineEdit()
+        
+        # ComboBox para categoría
+        self.categoria_combo = QComboBox()
+        self.categoria_combo.addItems([
+            "Ropa",
+            "Accesorios",
+            "Calzado",
+            "Electrónicos",
+            "Hogar",
+            "Otros"
+        ])
+        self.categoria_combo.setEditable(True)
         
         form_layout.addRow("Nombre:", self.nombre_input)
         form_layout.addRow("Descripción:", self.descripcion_input)
         form_layout.addRow("Cantidad:", self.cantidad_input)
         form_layout.addRow("Precio Compra:", self.precio_compra_input)
         form_layout.addRow("Precio Venta:", self.precio_venta_input)
-        form_layout.addRow("Categoría:", self.categoria_input)
+        form_layout.addRow("Categoría:", self.categoria_combo)
         
         layout.addLayout(form_layout)
         
@@ -556,7 +567,7 @@ class EditarArticuloDialog(QDialog):
         self.cantidad_input.setValue(int(self.tabla.item(self.row, 3).text()))
         self.precio_compra_input.setValue(float(self.tabla.item(self.row, 4).text().replace('$', '')))
         self.precio_venta_input.setValue(float(self.tabla.item(self.row, 5).text().replace('$', '')))
-        self.categoria_input.setText(self.tabla.item(self.row, 6).text())
+        self.categoria_combo.setCurrentText(self.tabla.item(self.row, 6).text())
         self.codigo_barras_input.setText(self.tabla.item(self.row, 7).text())
 
     def guardar_cambios(self):
@@ -585,7 +596,7 @@ class EditarArticuloDialog(QDialog):
                 self.cantidad_input.value(),
                 self.precio_compra_input.value(),
                 self.precio_venta_input.value(),
-                self.categoria_input.text().strip(),
+                self.categoria_combo.currentText().strip(),
                 self.codigo_barras_input.text().strip(),
                 int(self.id_input.text())
             ))
