@@ -60,10 +60,11 @@ QPushButton {{
     background-color: {COLORS['primary']};
     color: {COLORS['white']};
     border: none;
-    padding: 8px 15px;
-    border-radius: 6px;
-    font-size: 13px;
-    min-width: 80px;
+    padding: 3px 8px;
+    border-radius: 3px;
+    font-size: 11px;
+    min-width: 70px;
+    min-height: 20px;
 }}
 
 QPushButton:hover {{
@@ -84,6 +85,20 @@ QPushButton#warning {{
 
 QPushButton#danger {{
     background-color: {COLORS['danger']};
+}}
+
+/* Botón específico para detalles */
+QPushButton#details_button {{
+    min-width: 80px;
+    font-size: 10px;
+    padding: 2px 6px;
+    background-color: {COLORS['accent']};
+    color: {COLORS['dark']};
+}}
+
+QPushButton#details_button:hover {{
+    background-color: {COLORS['secondary']};
+    color: {COLORS['white']};
 }}
 
 /* Campos de texto */

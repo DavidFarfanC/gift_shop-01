@@ -1,7 +1,7 @@
 import sys
 import os
 from PyQt5.QtWidgets import (
-    QApplication, QMainWindow, QWidget, QVBoxLayout, 
+    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
     QLabel, QTabWidget, QStyleFactory, QMessageBox
 )
 from PyQt5.QtCore import Qt
@@ -25,54 +25,51 @@ class MainWindow(QMainWindow):
         # Widget central
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
-        layout = QVBoxLayout(central_widget)
-        layout.setSpacing(20)
-        layout.setContentsMargins(20, 20, 20, 20)
+        main_layout = QVBoxLayout(central_widget)
+        main_layout.setSpacing(20)
+        main_layout.setContentsMargins(20, 20, 20, 20)
 
-        # Logo
+        # Contenedor superior para el logo y bienvenida
+        top_container = QWidget()
+        top_layout = QHBoxLayout(top_container)
+        top_layout.setContentsMargins(0, 0, 0, 0)
+
+        # Logo (ahora más pequeño y a la izquierda)
         logo_label = QLabel()
         logo_label.setObjectName("logo")
+        logo_path = "assets/logo.jpg"
         
-        # Intentar diferentes rutas para el logo
-        possible_paths = [
-            "assets/logo.png",
-            "./assets/logo.png",
-            "../assets/logo.png",
-            os.path.join(os.path.dirname(__file__), "assets/logo.png")
-        ]
+        if os.path.exists(logo_path):
+            pixmap = QPixmap(logo_path)
+            if not pixmap.isNull():
+                # Logo más pequeño (100x100)
+                scaled_pixmap = pixmap.scaled(100, 100, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                logo_label.setPixmap(scaled_pixmap)
+                logo_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         
-        logo_loaded = False
-        for path in possible_paths:
-            if os.path.exists(path):
-                pixmap = QPixmap(path)
-                if not pixmap.isNull():
-                    scaled_pixmap = pixmap.scaled(150, 150, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-                    logo_label.setPixmap(scaled_pixmap)
-                    logo_loaded = True
-                    print(f"Logo cargado exitosamente desde: {path}")
-                    break
+        # Contenedor para el texto de bienvenida
+        welcome_container = QWidget()
+        welcome_layout = QVBoxLayout(welcome_container)
         
-        if not logo_loaded:
-            print("No se pudo cargar el logo. Rutas intentadas:", possible_paths)
-            print("Directorio actual:", os.getcwd())
-            logo_label.setText("W Gift Shop")
-            logo_label.setStyleSheet("""
-                QLabel {
-                    font-size: 24px;
-                    font-weight: bold;
-                    color: #9B8989;
-                    padding: 20px;
-                }
-            """)
-
-        logo_label.setAlignment(Qt.AlignCenter)
-        layout.addWidget(logo_label)
-
         # Título y bienvenida
         welcome = QLabel(f"Bienvenido, {self.user_data['rol'].title()}")
         welcome.setObjectName("welcome")
-        welcome.setAlignment(Qt.AlignCenter)
-        layout.addWidget(welcome)
+        welcome.setAlignment(Qt.AlignLeft)
+        
+        # Información del usuario
+        user_info = QLabel(f"Usuario: {self.user_data['telefono']} | Correo: {self.user_data['correo']}")
+        user_info.setAlignment(Qt.AlignLeft)
+        
+        welcome_layout.addWidget(welcome)
+        welcome_layout.addWidget(user_info)
+        
+        # Agregar logo y bienvenida al contenedor superior
+        top_layout.addWidget(logo_label)
+        top_layout.addWidget(welcome_container)
+        top_layout.addStretch()  # Esto empuja todo hacia la izquierda
+        
+        # Agregar el contenedor superior al layout principal
+        main_layout.addWidget(top_container)
 
         # Sistema de pestañas
         self.tab_widget = QTabWidget()
@@ -81,11 +78,6 @@ class MainWindow(QMainWindow):
         # Pestaña de inicio
         home_tab = QWidget()
         home_layout = QVBoxLayout(home_tab)
-        
-        # Información del usuario
-        user_info = QLabel(f"Usuario: {self.user_data['telefono']} | Correo: {self.user_data['correo']}")
-        user_info.setAlignment(Qt.AlignCenter)
-        home_layout.addWidget(user_info)
 
         # Pestaña de inventario
         inventory_tab = InventoryApp(self.user_data)
@@ -98,7 +90,7 @@ class MainWindow(QMainWindow):
         self.tab_widget.addTab(inventory_tab, "Inventario")
         self.tab_widget.addTab(sales_tab, "Ventas")
 
-        layout.addWidget(self.tab_widget)
+        main_layout.addWidget(self.tab_widget)
 
 class MainApplication:
     def __init__(self):
