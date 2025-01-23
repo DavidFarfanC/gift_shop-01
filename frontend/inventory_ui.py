@@ -16,10 +16,15 @@ from utils.barcode_utils import generar_codigo_desde_db, imprimir_codigo_barras
 
 
 class InventoryApp(QMainWindow):
-    def __init__(self):
+    def __init__(self, user_data=None):
         super().__init__()
+        self.user_data = user_data
         self.setWindowTitle("Gestor de Inventario")
         self.setGeometry(100, 100, 900, 600)
+
+        # Si hay datos de usuario, mostrar en el título
+        if self.user_data:
+            self.setWindowTitle(f"Gestor de Inventario - {self.user_data['rol'].title()}")
 
         # Paleta de colores base
         self.set_estilos()
@@ -113,6 +118,11 @@ class InventoryApp(QMainWindow):
         codigo_layout.addWidget(self.btn_generar_codigo)
 
         layout_principal.addLayout(codigo_layout)
+
+        # Botón para abrir ventana de ventas
+        self.btn_ventas = QPushButton("Abrir Ventas")
+        self.btn_ventas.clicked.connect(self.abrir_ventas)
+        layout_principal.addWidget(self.btn_ventas)
 
         # Contenedor principal
         container = QWidget()
@@ -288,6 +298,11 @@ class InventoryApp(QMainWindow):
         self.input_cantidad.clear()
         self.input_valor_real.clear()
         self.input_valor_venta.clear()
+
+    def abrir_ventas(self):
+        from frontend.sales_ui import SalesWindow
+        self.ventana_ventas = SalesWindow(self.user_data)
+        self.ventana_ventas.show()
 
 
 if __name__ == "__main__":
