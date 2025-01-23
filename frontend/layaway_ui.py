@@ -3,15 +3,18 @@ from PyQt5.QtWidgets import (
     QTableWidget, QTableWidgetItem, QDialog, QLineEdit, 
     QDateEdit, QSpinBox, QDoubleSpinBox, QTextEdit, QMessageBox,
     QComboBox, QFormLayout, QGroupBox, QHeaderView, QTabWidget,
-    QFileDialog
+    QFileDialog, QMainWindow, QDialogButtonBox
 )
-from PyQt5.QtCore import Qt, QDate
+from PyQt5.QtCore import Qt, QDate, pyqtSignal
 import sqlite3
 from datetime import datetime, timedelta
 from openpyxl import Workbook
+import pandas as pd
 
-class LayawayWindow(QWidget):
-    def __init__(self, user_data):
+class LayawayWindow(QMainWindow):
+    inventario_actualizado = pyqtSignal()
+    
+    def __init__(self, user_data=None):
         super().__init__()
         self.user_data = user_data
         self.init_database()
@@ -53,270 +56,212 @@ class LayawayWindow(QWidget):
             conn.close()
             print("Tabla de apartados recreada correctamente")
             
+            with sqlite3.connect("db/movements.db") as conn:
+                cursor = conn.cursor()
+                
+                # Verificar si la columna fecha_finalizacion existe
+                cursor.execute("PRAGMA table_info(apartados)")
+                columns = [column[1] for column in cursor.fetchall()]
+                
+                # Si no existe la columna, agregarla
+                if 'fecha_finalizacion' not in columns:
+                    cursor.execute("""
+                        ALTER TABLE apartados 
+                        ADD COLUMN fecha_finalizacion TIMESTAMP
+                    """)
+                    conn.commit()
+                    
         except sqlite3.Error as e:
             print(f"Error al inicializar la base de datos: {str(e)}")
 
     def setup_ui(self):
-        layout = QVBoxLayout(self)
-        
+        self.setWindowTitle("Gestión de Apartados")
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
+        layout = QVBoxLayout(central_widget)
+
         # Crear el widget de pestañas
-        self.tabs = QTabWidget()
-        
+        self.tab_widget = QTabWidget()
+        layout.addWidget(self.tab_widget)
+
         # Pestaña de Apartados Activos
         self.tab_apartados = QWidget()
         self.setup_apartados_tab()
-        self.tabs.addTab(self.tab_apartados, "Apartados Activos")
-        
+        self.tab_widget.addTab(self.tab_apartados, "Apartados Activos")
+
+        # Pestaña de Histórico
+        self.tab_historico = QWidget()
+        self.setup_historico_tab()
+        self.tab_widget.addTab(self.tab_historico, "Histórico")
+
         # Pestaña de Clientes
         self.tab_clientes = QWidget()
         self.setup_clientes_tab()
-        self.tabs.addTab(self.tab_clientes, "Clientes")
-        
-        # Nueva Pestaña de Historial
-        self.tab_historial = QWidget()
-        self.setup_historial_tab()
-        self.tabs.addTab(self.tab_historial, "Historial de Apartados")
-        
-        layout.addWidget(self.tabs)
+        self.tab_widget.addTab(self.tab_clientes, "Clientes")
 
     def setup_apartados_tab(self):
         layout = QVBoxLayout(self.tab_apartados)
-        
+
         # Botones superiores
         button_layout = QHBoxLayout()
+        btn_new_layaway = QPushButton("Nuevo Apartado")
+        btn_new_layaway.clicked.connect(self.show_new_layaway)
+        btn_new_client = QPushButton("Nuevo Cliente")
+        btn_new_client.clicked.connect(self.show_new_client_dialog)
+        btn_add_payment = QPushButton("Agregar Abono")
+        btn_add_payment.clicked.connect(self.show_add_payment_dialog)
         
-        self.btn_new_client = QPushButton("Nuevo Cliente")
-        self.btn_new_layaway = QPushButton("Nuevo Apartado")
-        self.btn_new_client.clicked.connect(self.show_new_client_dialog)
-        self.btn_new_layaway.clicked.connect(self.show_new_layaway_dialog)
-        
-        button_layout.addWidget(self.btn_new_client)
-        button_layout.addWidget(self.btn_new_layaway)
+        button_layout.addWidget(btn_new_layaway)
+        button_layout.addWidget(btn_new_client)
+        button_layout.addWidget(btn_add_payment)
         button_layout.addStretch()
         
         layout.addLayout(button_layout)
-        
-        # Tabla de apartados
+
+        # Tabla de apartados activos
         self.layaway_table = QTableWidget()
         self.layaway_table.setColumnCount(10)
         self.layaway_table.setHorizontalHeaderLabels([
-            "ID", "Cliente", "Teléfono", "Artículo", "Cantidad",
-            "Total", "Anticipo", "Monto Restante", "Estado Pago", "Fecha Límite"
+            "ID", "Cliente", "Teléfono", "Artículo",
+            "Cantidad", "Total", "Anticipo", "Restante",
+            "Estado", "Fecha Límite"
         ])
+        
+        # Permitir selección de fila
+        self.layaway_table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.layaway_table.setSelectionMode(QTableWidget.SingleSelection)
+        
         header = self.layaway_table.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.ResizeToContents)
-        
         layout.addWidget(self.layaway_table)
-        self.load_layaways()
+
+    def setup_historico_tab(self):
+        layout = QVBoxLayout(self.tab_historico)
+
+        # Tabla de histórico
+        self.historic_table = QTableWidget()
+        self.historic_table.setColumnCount(11)
+        self.historic_table.setHorizontalHeaderLabels([
+            "ID", "Cliente", "Teléfono", "Artículo",
+            "Cantidad", "Total", "Anticipo", "Restante",
+            "Estado", "Fecha Creación", "Fecha Finalización"
+        ])
+        
+        header = self.historic_table.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.ResizeToContents)
+        layout.addWidget(self.historic_table)
+
+        # Botón para exportar
+        btn_export = QPushButton("Exportar a Excel")
+        btn_export.clicked.connect(self.export_historic)
+        layout.addWidget(btn_export)
+
+        # Cargar datos históricos
+        self.load_historic()
 
     def setup_clientes_tab(self):
         layout = QVBoxLayout(self.tab_clientes)
-        
-        # Botones y búsqueda
-        top_layout = QHBoxLayout()
-        
-        # Búsqueda
-        self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("Buscar cliente...")
-        self.search_input.textChanged.connect(self.filter_clients)
-        top_layout.addWidget(self.search_input)
-        
-        # Botón nuevo cliente
+
+        # Botón para agregar cliente
         btn_add_client = QPushButton("Nuevo Cliente")
         btn_add_client.clicked.connect(self.show_new_client_dialog)
-        top_layout.addWidget(btn_add_client)
-        
-        layout.addLayout(top_layout)
-        
+        layout.addWidget(btn_add_client)
+
         # Tabla de clientes
         self.clients_table = QTableWidget()
         self.clients_table.setColumnCount(6)
         self.clients_table.setHorizontalHeaderLabels([
-            "ID", "Nombre", "Teléfono", "Correo", 
+            "ID", "Nombre", "Teléfono", "Correo",
             "Fecha Registro", "Apartados Activos"
         ])
+        
         header = self.clients_table.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.ResizeToContents)
-        
         layout.addWidget(self.clients_table)
-        
-        # Botones de acción
-        action_layout = QHBoxLayout()
-        
-        btn_edit = QPushButton("Editar")
-        btn_edit.clicked.connect(self.edit_client)
-        btn_view_layaways = QPushButton("Ver Apartados")
-        btn_view_layaways.clicked.connect(self.view_client_layaways)
-        
-        action_layout.addWidget(btn_edit)
-        action_layout.addWidget(btn_view_layaways)
-        action_layout.addStretch()
-        
-        layout.addLayout(action_layout)
-        
+
+        # Cargar datos de clientes
         self.load_clients_table()
 
-    def setup_historial_tab(self):
-        layout = QVBoxLayout(self.tab_historial)
-        
-        # Filtros superiores
-        filter_layout = QHBoxLayout()
-        
-        # Filtro por estado
-        self.estado_combo = QComboBox()
-        self.estado_combo.addItems(["Todos", "Pagados", "Cancelados"])
-        self.estado_combo.currentTextChanged.connect(self.load_historial)
-        
-        # Filtro por fecha
-        self.fecha_desde = QDateEdit()
-        self.fecha_desde.setCalendarPopup(True)
-        self.fecha_desde.setDate(QDate.currentDate().addMonths(-1))
-        self.fecha_hasta = QDateEdit()
-        self.fecha_hasta.setCalendarPopup(True)
-        self.fecha_hasta.setDate(QDate.currentDate())
-        
-        # Búsqueda por cliente
-        self.buscar_cliente = QLineEdit()
-        self.buscar_cliente.setPlaceholderText("Buscar por cliente...")
-        self.buscar_cliente.textChanged.connect(self.filtrar_historial)
-        
-        filter_layout.addWidget(QLabel("Estado:"))
-        filter_layout.addWidget(self.estado_combo)
-        filter_layout.addWidget(QLabel("Desde:"))
-        filter_layout.addWidget(self.fecha_desde)
-        filter_layout.addWidget(QLabel("Hasta:"))
-        filter_layout.addWidget(self.fecha_hasta)
-        filter_layout.addWidget(QLabel("Cliente:"))
-        filter_layout.addWidget(self.buscar_cliente)
-        
-        btn_buscar = QPushButton("Buscar")
-        btn_buscar.clicked.connect(self.load_historial)
-        filter_layout.addWidget(btn_buscar)
-        
-        layout.addLayout(filter_layout)
-        
-        # Tabla de historial
-        self.historial_table = QTableWidget()
-        self.historial_table.setColumnCount(11)
-        self.historial_table.setHorizontalHeaderLabels([
-            "ID", "Fecha", "Cliente", "Teléfono", "Artículo",
-            "Cantidad", "Total", "Anticipo", "Monto Restante",
-            "Estado Final", "Fecha Finalización"
-        ])
-        header = self.historial_table.horizontalHeader()
-        header.setSectionResizeMode(QHeaderView.ResizeToContents)
-        
-        layout.addWidget(self.historial_table)
-        
-        # Botón para exportar
-        btn_exportar = QPushButton("Exportar a Excel")
-        btn_exportar.clicked.connect(self.exportar_historial)
-        layout.addWidget(btn_exportar)
-        
-        # Cargar datos iniciales
-        self.load_historial()
-
     def load_clients_table(self):
-        conn = None
-        conn_movements = None
         try:
-            # Usar with para manejar las conexiones automáticamente
-            with sqlite3.connect("db/store.db") as conn:
-                cursor = conn.cursor()
+            with sqlite3.connect("db/store.db") as conn_store, \
+                 sqlite3.connect("db/movements.db") as conn_movements:
+                cursor_store = conn_store.cursor()
+                cursor_movements = conn_movements.cursor()
                 
-                # Primero obtenemos los clientes
-                cursor.execute("""
-                    SELECT 
-                        id, nombre, telefono, correo, fecha_registro
+                # Obtener clientes
+                cursor_store.execute("""
+                    SELECT id, nombre, telefono, correo, fecha_registro
                     FROM clientes
                     ORDER BY nombre
                 """)
                 
-                clients = cursor.fetchall()
+                clients = cursor_store.fetchall()
                 self.clients_table.setRowCount(len(clients))
                 
-                # Usar with para la segunda conexión
-                with sqlite3.connect("db/movements.db") as conn_movements:
-                    cursor_movements = conn_movements.cursor()
+                for row, client in enumerate(clients):
+                    # Obtener cantidad de apartados activos
+                    cursor_movements.execute("""
+                        SELECT COUNT(*) 
+                        FROM apartados 
+                        WHERE cliente_telefono = ? 
+                        AND estado = 'pendiente'
+                    """, (client[2],))
                     
-                    for row, client in enumerate(clients):
-                        # Obtener cantidad de apartados activos para este cliente
-                        cursor_movements.execute("""
-                            SELECT COUNT(*) 
-                            FROM apartados 
-                            WHERE cliente_telefono = ? 
-                            AND estado = 'pendiente'
-                        """, (client[2],))  # client[2] es el teléfono
-                        
-                        apartados_count = cursor_movements.fetchone()[0]
-                        
-                        # Mostrar datos en la tabla
-                        for col, value in enumerate(client):
-                            if col == 4:  # Fecha
-                                text = value.split()[0] if value else ''
-                            else:
-                                text = str(value)
-                            item = QTableWidgetItem(text)
-                            item.setTextAlignment(Qt.AlignCenter)
-                            self.clients_table.setItem(row, col, item)
-                        
-                        # Agregar contador de apartados
-                        item = QTableWidgetItem(str(apartados_count))
+                    apartados_count = cursor_movements.fetchone()[0]
+                    
+                    # Mostrar datos en la tabla
+                    for col, value in enumerate(client):
+                        if col == 4:  # Fecha
+                            text = value.split()[0] if value else ''
+                        else:
+                            text = str(value)
+                        item = QTableWidgetItem(text)
                         item.setTextAlignment(Qt.AlignCenter)
-                        self.clients_table.setItem(row, 5, item)
-            
+                        self.clients_table.setItem(row, col, item)
+                    
+                    # Agregar contador de apartados
+                    item = QTableWidgetItem(str(apartados_count))
+                    item.setTextAlignment(Qt.AlignCenter)
+                    self.clients_table.setItem(row, 5, item)
+                
         except sqlite3.Error as e:
             QMessageBox.critical(self, "Error", f"Error al cargar clientes: {str(e)}")
-
-    def filter_clients(self):
-        search_text = self.search_input.text().lower()
-        for row in range(self.clients_table.rowCount()):
-            show_row = False
-            for col in range(1, 4):  # Buscar en nombre, teléfono y correo
-                item = self.clients_table.item(row, col)
-                if item and search_text in item.text().lower():
-                    show_row = True
-                    break
-            self.clients_table.setRowHidden(row, not show_row)
-
-    def edit_client(self):
-        current_row = self.clients_table.currentRow()
-        if current_row < 0:
-            QMessageBox.warning(self, "Error", "Por favor seleccione un cliente")
-            return
-            
-        client_id = self.clients_table.item(current_row, 0).text()
-        dialog = ClientDialog(self, client_id)
-        if dialog.exec_() == QDialog.Accepted:
-            self.load_clients_table()
-
-    def view_client_layaways(self):
-        current_row = self.clients_table.currentRow()
-        if current_row < 0:
-            QMessageBox.warning(self, "Error", "Por favor seleccione un cliente")
-            return
-            
-        telefono = self.clients_table.item(current_row, 2).text()
-        dialog = ClientLayawaysDialog(self, telefono)
-        dialog.exec_()
 
     def show_new_client_dialog(self):
         dialog = ClientDialog(self)
         if dialog.exec_() == QDialog.Accepted:
-            # Recargar la tabla de clientes inmediatamente
             self.load_clients_table()
-            # Si estamos en la pestaña de apartados, actualizar el combo de clientes
-            if hasattr(self, 'client_combo'):
-                self.load_clients_combo()
+            self.load_layaways()
 
-    def show_new_layaway_dialog(self):
+    def show_new_layaway(self):
         dialog = LayawayDialog(self.user_data)
         if dialog.exec_() == QDialog.Accepted:
             self.load_layaways()
+            self.load_clients_table()
+
+    def show_add_payment_dialog(self):
+        # Obtener el apartado seleccionado
+        current_row = self.layaway_table.currentRow()
+        if current_row < 0:
+            QMessageBox.warning(self, "Error", "Por favor seleccione un apartado para abonar")
+            return
+
+        # Obtener datos del apartado seleccionado
+        apartado_id = int(self.layaway_table.item(current_row, 0).text())
+        restante = float(self.layaway_table.item(current_row, 7).text().replace('$', ''))
+        
+        if restante <= 0:
+            QMessageBox.warning(self, "Error", "Este apartado ya está pagado")
+            return
+
+        dialog = AddPaymentDialog(apartado_id, restante, self)
+        if dialog.exec_() == QDialog.Accepted:
+            self.load_layaways()
+            self.load_historic()
 
     def load_layaways(self):
         try:
-            # Usar with para manejar la conexión automáticamente
             with sqlite3.connect("db/movements.db") as conn:
                 cursor = conn.cursor()
                 
@@ -353,119 +298,76 @@ class LayawayWindow(QWidget):
         except sqlite3.Error as e:
             QMessageBox.critical(self, "Error", f"Error al cargar apartados: {str(e)}")
 
-    def load_historial(self):
+    def load_historic(self):
         try:
-            conn = sqlite3.connect("db/movements.db")
-            cursor = conn.cursor()
-            
-            # Construir la consulta base
-            query = """
-                SELECT 
-                    id, fecha_creacion, cliente_nombre, cliente_telefono,
-                    articulo_nombre, cantidad, precio_total, anticipo,
-                    restante, estado,
-                    CASE 
-                        WHEN estado = 'completado' THEN fecha_creacion
-                        WHEN estado = 'cancelado' THEN fecha_creacion
-                        ELSE NULL 
-                    END as fecha_finalizacion
-                FROM apartados
-                WHERE estado != 'pendiente'
-                AND fecha_creacion BETWEEN ? AND ?
-            """
-            
-            # Aplicar filtro de estado
-            estado_filtro = self.estado_combo.currentText()
-            if estado_filtro == "Pagados":
-                query += " AND estado = 'completado'"
-            elif estado_filtro == "Cancelados":
-                query += " AND estado = 'cancelado'"
-            
-            # Obtener fechas
-            fecha_desde = self.fecha_desde.date().toString("yyyy-MM-dd")
-            fecha_hasta = self.fecha_hasta.date().toString("yyyy-MM-dd")
-            
-            cursor.execute(query + " ORDER BY fecha_creacion DESC", (fecha_desde, fecha_hasta))
-            apartados = cursor.fetchall()
-            
-            self.historial_table.setRowCount(len(apartados))
-            
-            for row, apartado in enumerate(apartados):
-                for col, value in enumerate(apartado):
-                    if col in [6, 7, 8]:  # Valores monetarios
-                        text = f"${value:.2f}"
-                    elif col in [1, 10]:  # Fechas
-                        text = value.split()[0] if value else ''
-                    elif col == 9:  # Estado
-                        text = {
-                            'completado': 'Pagado',
-                            'cancelado': 'Cancelado'
-                        }.get(value, value)
-                    else:
-                        text = str(value)
-                    
-                    item = QTableWidgetItem(text)
-                    item.setTextAlignment(Qt.AlignCenter)
-                    self.historial_table.setItem(row, col, item)
-            
-            conn.close()
+            with sqlite3.connect("db/movements.db") as conn:
+                cursor = conn.cursor()
+                
+                cursor.execute("""
+                    SELECT 
+                        id, cliente_nombre, cliente_telefono,
+                        articulo_nombre, cantidad, precio_total,
+                        anticipo, restante,
+                        CASE 
+                            WHEN estado = 'pendiente' THEN 'Por Pagar'
+                            WHEN estado = 'completado' THEN 'Pagado'
+                            WHEN estado = 'cancelado' THEN 'Cancelado'
+                        END as estado_pago,
+                        fecha_creacion,
+                        fecha_finalizacion
+                    FROM apartados
+                    WHERE estado != 'pendiente'
+                    ORDER BY fecha_creacion DESC
+                """)
+                
+                apartados = cursor.fetchall()
+                self.historic_table.setRowCount(len(apartados))
+                
+                for row, apartado in enumerate(apartados):
+                    for col, value in enumerate(apartado):
+                        if col in [5, 6, 7]:  # Valores monetarios
+                            text = f"${value:.2f}"
+                        elif col in [9, 10]:  # Fechas
+                            text = value.split()[0] if value else ''
+                        else:
+                            text = str(value)
+                        item = QTableWidgetItem(text)
+                        item.setTextAlignment(Qt.AlignCenter)
+                        self.historic_table.setItem(row, col, item)
             
         except sqlite3.Error as e:
-            QMessageBox.critical(self, "Error", f"Error al cargar historial: {str(e)}")
+            QMessageBox.critical(self, "Error", f"Error al cargar histórico: {str(e)}")
 
-    def filtrar_historial(self):
-        texto = self.buscar_cliente.text().lower()
-        for row in range(self.historial_table.rowCount()):
-            mostrar = False
-            # Buscar en nombre y teléfono del cliente
-            for col in [2, 3]:  # Columnas de cliente y teléfono
-                item = self.historial_table.item(row, col)
-                if item and texto in item.text().lower():
-                    mostrar = True
-                    break
-            self.historial_table.setRowHidden(row, not mostrar)
-
-    def exportar_historial(self):
+    def export_historic(self):
         try:
-            filename, _ = QFileDialog.getSaveFileName(
+            # Obtener datos de la tabla
+            data = []
+            for row in range(self.historic_table.rowCount()):
+                row_data = []
+                for col in range(self.historic_table.columnCount()):
+                    item = self.historic_table.item(row, col)
+                    row_data.append(item.text() if item else '')
+                data.append(row_data)
+            
+            # Crear DataFrame
+            df = pd.DataFrame(data, columns=[
+                "ID", "Cliente", "Teléfono", "Artículo",
+                "Cantidad", "Total", "Anticipo", "Restante",
+                "Estado", "Fecha Creación", "Fecha Finalización"
+            ])
+            
+            # Generar nombre de archivo
+            filename = f"historico_apartados_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+            
+            # Guardar archivo
+            df.to_excel(filename, index=False)
+            
+            QMessageBox.information(
                 self, 
-                "Guardar Excel", 
-                "", 
-                "Excel Files (*.xlsx)"
+                "Éxito", 
+                f"Archivo exportado correctamente:\n{filename}"
             )
             
-            if filename:
-                if not filename.endswith('.xlsx'):
-                    filename += '.xlsx'
-                
-                # Crear Excel
-                wb = Workbook()
-                ws = wb.active
-                ws.title = "Historial de Apartados"
-                
-                # Escribir encabezados
-                headers = [
-                    "ID", "Fecha", "Cliente", "Teléfono", "Artículo",
-                    "Cantidad", "Total", "Anticipo", "Monto Restante",
-                    "Estado Final", "Fecha Finalización"
-                ]
-                for col, header in enumerate(headers, 1):
-                    ws.cell(row=1, column=col, value=header)
-                
-                # Escribir datos
-                for row in range(self.historial_table.rowCount()):
-                    if not self.historial_table.isRowHidden(row):
-                        for col in range(self.historial_table.columnCount()):
-                            item = self.historial_table.item(row, col)
-                            ws.cell(row=row+2, column=col+1, value=item.text())
-                
-                wb.save(filename)
-                QMessageBox.information(
-                    self, 
-                    "Éxito", 
-                    "Historial exportado correctamente"
-                )
-                
         except Exception as e:
             QMessageBox.critical(
                 self, 
@@ -488,10 +390,10 @@ class ClientDialog(QDialog):
         # Formulario
         form_layout = QFormLayout()
         
-        self.nombre = QLineEdit()
-        self.telefono = QLineEdit()
-        self.correo = QLineEdit()
-        self.notas = QTextEdit()
+        self.nombre_input = QLineEdit()
+        self.telefono_input = QLineEdit()
+        self.correo_input = QLineEdit()
+        self.notas_input = QTextEdit()
         
         if self.client_id:
             conn = sqlite3.connect("db/store.db")
@@ -503,22 +405,22 @@ class ClientDialog(QDialog):
             conn.close()
             
             if client_data:
-                self.nombre.setText(client_data[0])
-                self.telefono.setText(client_data[1])
-                self.correo.setText(client_data[2])
-                self.notas.setText(client_data[3])
+                self.nombre_input.setText(client_data[0])
+                self.telefono_input.setText(client_data[1])
+                self.correo_input.setText(client_data[2])
+                self.notas_input.setText(client_data[3])
         
-        form_layout.addRow("Nombre:", self.nombre)
-        form_layout.addRow("Teléfono:", self.telefono)
-        form_layout.addRow("Correo:", self.correo)
-        form_layout.addRow("Notas:", self.notas)
+        form_layout.addRow("Nombre:", self.nombre_input)
+        form_layout.addRow("Teléfono:", self.telefono_input)
+        form_layout.addRow("Correo:", self.correo_input)
+        form_layout.addRow("Notas:", self.notas_input)
         
         layout.addLayout(form_layout)
 
         # Botones
         buttons = QHBoxLayout()
         self.btn_guardar = QPushButton("Guardar")
-        self.btn_guardar.clicked.connect(self.save_client)
+        self.btn_guardar.clicked.connect(self.accept)
         btn_cancelar = QPushButton("Cancelar")
         btn_cancelar.clicked.connect(self.reject)
         
@@ -526,51 +428,70 @@ class ClientDialog(QDialog):
         buttons.addWidget(btn_cancelar)
         layout.addLayout(buttons)
 
-    def save_client(self):
+    def accept(self):
         try:
-            if not self.nombre.text().strip():
+            # Obtener valores
+            nombre = self.nombre_input.text().strip()
+            telefono = self.telefono_input.text().strip()
+            correo = self.correo_input.text().strip()
+            notas = self.notas_input.toPlainText().strip()
+            
+            # Validaciones
+            if not nombre:
                 raise ValueError("El nombre es obligatorio")
-            if not self.telefono.text().strip():
+            if not telefono:
                 raise ValueError("El teléfono es obligatorio")
             
-            conn = sqlite3.connect("db/store.db")
-            cursor = conn.cursor()
+            with sqlite3.connect("db/store.db") as conn:
+                cursor = conn.cursor()
+                
+                # Verificar si el teléfono ya existe (solo para nuevos clientes)
+                if not self.client_id:  # Solo verificar para nuevos clientes
+                    cursor.execute("""
+                        SELECT id FROM clientes 
+                        WHERE telefono = ?
+                    """, (telefono,))
+                    
+                    if cursor.fetchone():
+                        raise ValueError("Ya existe un cliente con ese teléfono")
+                
+                # Insertar o actualizar cliente
+                if self.client_id:
+                    cursor.execute("""
+                        UPDATE clientes 
+                        SET nombre = ?, telefono = ?, correo = ?, notas = ?
+                        WHERE id = ?
+                    """, (nombre, telefono, correo, notas, self.client_id))
+                else:
+                    cursor.execute("""
+                        INSERT INTO clientes (nombre, telefono, correo, notas)
+                        VALUES (?, ?, ?, ?)
+                    """, (nombre, telefono, correo, notas))
+                
+                conn.commit()
             
-            if self.client_id:
-                cursor.execute("""
-                    UPDATE clientes 
-                    SET nombre = ?, telefono = ?, correo = ?, notas = ?
-                    WHERE id = ?
-                """, (
-                    self.nombre.text().strip(),
-                    self.telefono.text().strip(),
-                    self.correo.text().strip(),
-                    self.notas.toPlainText().strip(),
-                    self.client_id
-                ))
-            else:
-                cursor.execute("""
-                    INSERT INTO clientes (nombre, telefono, correo, notas)
-                    VALUES (?, ?, ?, ?)
-                """, (
-                    self.nombre.text().strip(),
-                    self.telefono.text().strip(),
-                    self.correo.text().strip(),
-                    self.notas.toPlainText().strip()
-                ))
+            # Notificar éxito
+            QMessageBox.information(
+                self, 
+                "Éxito", 
+                "Cliente guardado correctamente"
+            )
             
-            conn.commit()
-            conn.close()
+            # Actualizar la vista principal
+            if isinstance(self.parent(), LayawayWindow):
+                self.parent().load_clients_table()
             
-            QMessageBox.information(self, "Éxito", "Cliente registrado correctamente")
-            self.accept()
+            # Cerrar el diálogo
+            super().accept()
             
-        except sqlite3.IntegrityError:
-            QMessageBox.warning(self, "Error", "Ya existe un cliente con ese teléfono")
         except ValueError as e:
             QMessageBox.warning(self, "Error", str(e))
         except sqlite3.Error as e:
-            QMessageBox.critical(self, "Error", f"Error en la base de datos: {str(e)}")
+            QMessageBox.critical(
+                self, 
+                "Error", 
+                f"Error en la base de datos: {str(e)}"
+            )
 
     def load_client_data(self):
         conn = sqlite3.connect("db/store.db")
@@ -582,108 +503,17 @@ class ClientDialog(QDialog):
         conn.close()
         
         if client_data:
-            self.nombre.setText(client_data[0])
-            self.telefono.setText(client_data[1])
-            self.correo.setText(client_data[2])
-            self.notas.setText(client_data[3])
-
-    def accept(self):
-        try:
-            # Obtener valores
-            nombre = self.nombre.text().strip()
-            telefono = self.telefono.text().strip()
-            correo = self.correo.text().strip()
-            notas = self.notas.toPlainText().strip()
-            
-            # Validaciones
-            if not nombre:
-                raise ValueError("El nombre es obligatorio")
-            if not telefono:
-                raise ValueError("El teléfono es obligatorio")
-            
-            conn = sqlite3.connect("db/store.db")
-            cursor = conn.cursor()
-            
-            if self.client_id:  # Editar cliente existente
-                cursor.execute("""
-                    UPDATE clientes 
-                    SET nombre = ?, telefono = ?, correo = ?, notas = ?
-                    WHERE id = ?
-                """, (nombre, telefono, correo, notas, self.client_id))
-            else:  # Nuevo cliente
-                cursor.execute("""
-                    INSERT INTO clientes (nombre, telefono, correo, notas)
-                    VALUES (?, ?, ?, ?)
-                """, (nombre, telefono, correo, notas))
-            
-            conn.commit()
-            conn.close()
-            
-            # Notificar éxito
-            QMessageBox.information(
-                self, 
-                "Éxito", 
-                "Cliente guardado correctamente"
-            )
-            
-            # Cerrar el diálogo con éxito
-            super().accept()
-            
-            # Forzar actualización de la vista principal
-            if self.parent():
-                self.parent().load_clients_table()
-                if hasattr(self.parent(), 'client_combo'):
-                    self.parent().load_clients_combo()
-            
-        except ValueError as e:
-            QMessageBox.warning(self, "Error", str(e))
-        except sqlite3.IntegrityError:
-            QMessageBox.warning(
-                self, 
-                "Error", 
-                "Ya existe un cliente con ese teléfono"
-            )
-        except sqlite3.Error as e:
-            QMessageBox.critical(
-                self, 
-                "Error", 
-                f"Error en la base de datos: {str(e)}"
-            )
-
-    def load_clients_combo(self):
-        try:
-            conn = sqlite3.connect("db/store.db")
-            cursor = conn.cursor()
-            
-            cursor.execute("""
-                SELECT id, nombre, telefono 
-                FROM clientes 
-                ORDER BY nombre
-            """)
-            
-            clients = cursor.fetchall()
-            self.client_combo.clear()
-            self.client_combo.addItem("Seleccione un cliente", None)
-            
-            self.clients_data = {}
-            for client in clients:
-                client_id, nombre, telefono = client
-                self.clients_data[client_id] = {
-                    "id": client_id,
-                    "nombre": nombre,
-                    "telefono": telefono
-                }
-                self.client_combo.addItem(f"{nombre} - {telefono}", client_id)
-            
-            conn.close()
-            
-        except sqlite3.Error as e:
-            QMessageBox.critical(self, "Error", f"Error al cargar clientes: {str(e)}")
+            self.nombre_input.setText(client_data[0])
+            self.telefono_input.setText(client_data[1])
+            self.correo_input.setText(client_data[2])
+            self.notas_input.setText(client_data[3])
 
 class LayawayDialog(QDialog):
     def __init__(self, user_data):
         super().__init__()
         self.user_data = user_data
+        self.current_client = None
+        self.current_item = None
         self.setup_ui()
 
     def setup_ui(self):
@@ -775,10 +605,6 @@ class LayawayDialog(QDialog):
         buttons.addWidget(btn_cancelar)
         layout.addLayout(buttons)
 
-        # Inicializar variables
-        self.current_item = None
-        self.current_client = None
-
     def search_client(self):
         telefono = self.phone_search.text().strip()
         if not telefono:
@@ -786,46 +612,41 @@ class LayawayDialog(QDialog):
             return
             
         try:
-            conn = sqlite3.connect("db/store.db")
-            cursor = conn.cursor()
-            
-            cursor.execute("""
-                SELECT id, nombre, telefono, correo 
-                FROM clientes 
-                WHERE telefono = ?
-            """, (telefono,))
-            
-            client = cursor.fetchone()
-            conn.close()
-            
-            if client:
-                self.current_client = {
-                    "id": client[0],
-                    "nombre": client[1],
-                    "telefono": client[2],
-                    "correo": client[3]
-                }
+            with sqlite3.connect("db/store.db") as conn:
+                cursor = conn.cursor()
                 
-                self.client_info.setText(
-                    f"Cliente encontrado:\n"
-                    f"Nombre: {client[1]}\n"
-                    f"Teléfono: {client[2]}\n"
-                    f"Correo: {client[3] or 'No especificado'}"
-                )
+                cursor.execute("""
+                    SELECT id, nombre, telefono, correo 
+                    FROM clientes 
+                    WHERE telefono = ?
+                """, (telefono,))
                 
-                self.check_enable_save()
-            else:
-                QMessageBox.warning(self, "Error", "Cliente no encontrado")
-                self.client_info.setText("No se ha seleccionado ningún cliente")
-                self.current_client = None
-                self.check_enable_save()
+                client = cursor.fetchone()
                 
+                if client:
+                    self.current_client = {
+                        "id": client[0],
+                        "nombre": client[1],
+                        "telefono": client[2],
+                        "correo": client[3]
+                    }
+                    
+                    self.client_info.setText(
+                        f"Cliente encontrado:\n"
+                        f"Nombre: {client[1]}\n"
+                        f"Teléfono: {client[2]}\n"
+                        f"Correo: {client[3] or 'No especificado'}"
+                    )
+                    
+                    self.check_enable_save()
+                else:
+                    QMessageBox.warning(self, "Error", "Cliente no encontrado")
+                    self.client_info.setText("No se ha seleccionado ningún cliente")
+                    self.current_client = None
+                    self.check_enable_save()
+                    
         except sqlite3.Error as e:
             QMessageBox.critical(self, "Error", f"Error en la base de datos: {str(e)}")
-
-    def check_enable_save(self):
-        # Habilitar el botón guardar solo si hay cliente y artículo seleccionados
-        self.btn_guardar.setEnabled(self.current_client is not None and self.current_item is not None)
 
     def search_item(self):
         search_id = self.id_search.text().strip()
@@ -834,78 +655,66 @@ class LayawayDialog(QDialog):
             return
             
         try:
-            # Convertimos a número para buscar por ID
-            try:
-                id_numero = int(search_id)
-            except ValueError:
-                QMessageBox.warning(self, "Error", "Por favor ingrese un número de ID válido")
-                return
+            id_numero = int(search_id)
+            
+            with sqlite3.connect("db/store.db") as conn:
+                cursor = conn.cursor()
                 
-            print(f"Buscando artículo con ID: {id_numero}")  # Debug
-            conn = sqlite3.connect("db/store.db")
-            cursor = conn.cursor()
-            
-            # Buscamos solo por ID numérico
-            cursor.execute("""
-                SELECT id, nombre, precio_venta, cantidad 
-                FROM inventario 
-                WHERE id = ? AND cantidad > 0
-            """, (id_numero,))
-            
-            item = cursor.fetchone()
-            
-            if item:
-                print(f"Artículo encontrado: {item}")  # Debug
-                self.current_item = {
-                    "id": item[0],
-                    "nombre": item[1],
-                    "precio": item[2],
-                    "disponible": item[3]
-                }
+                cursor.execute("""
+                    SELECT id, nombre, precio_venta, cantidad 
+                    FROM inventario 
+                    WHERE id = ? AND cantidad > 0
+                """, (id_numero,))
                 
-                self.item_info.setText(
-                    f"ID: {item[0]}\n"
-                    f"Artículo: {item[1]}\n"
-                    f"Precio: ${item[2]:.2f}\n"
-                    f"Disponible: {item[3]} unidades"
-                )
+                item = cursor.fetchone()
                 
-                self.cantidad.setMaximum(item[3])
-                self.btn_guardar.setEnabled(True)
-                self.update_price()
-            else:
-                print(f"No se encontró el artículo con ID: {id_numero}")  # Debug
-                QMessageBox.warning(self, "Error", "Artículo no encontrado o sin existencias")
-                self.clear_item_info()
-            
-            conn.close()
-            
+                if item:
+                    self.current_item = {
+                        "id": item[0],
+                        "nombre": item[1],
+                        "precio": item[2],
+                        "disponible": item[3]
+                    }
+                    
+                    self.item_info.setText(
+                        f"ID: {item[0]}\n"
+                        f"Artículo: {item[1]}\n"
+                        f"Precio: ${item[2]:.2f}\n"
+                        f"Disponible: {item[3]} unidades"
+                    )
+                    
+                    self.cantidad.setMaximum(item[3])
+                    self.check_enable_save()
+                    self.update_price()
+                else:
+                    QMessageBox.warning(self, "Error", "Artículo no encontrado o sin existencias")
+                    self.clear_item_info()
+                
+        except ValueError:
+            QMessageBox.warning(self, "Error", "Por favor ingrese un número de ID válido")
         except sqlite3.Error as e:
-            print(f"Error de SQLite: {str(e)}")  # Debug
             QMessageBox.critical(self, "Error", f"Error en la base de datos: {str(e)}")
             self.clear_item_info()
 
     def clear_item_info(self):
-        self.item_info.setText("Artículo no seleccionado")
+        self.item_info.setText("No se ha seleccionado ningún artículo")
         self.current_item = None
-        self.btn_guardar.setEnabled(False)
+        self.check_enable_save()
         self.total_label.setText("Total: $0.00")
         self.restante_label.setText("Restante: $0.00")
         self.cantidad.setValue(1)
         self.anticipo.setValue(0)
 
+    def check_enable_save(self):
+        self.btn_guardar.setEnabled(self.current_client is not None and self.current_item is not None)
+
     def update_price(self):
-        if hasattr(self, 'current_item') and self.current_item:
+        if self.current_item:
             total = self.current_item["precio"] * self.cantidad.value()
             self.total_label.setText(f"Total: ${total:.2f}")
             self.anticipo.setMaximum(total)
-            self.update_remaining()
-
-    def update_remaining(self):
-        if hasattr(self, 'current_item') and self.current_item:
-            total = self.current_item["precio"] * self.cantidad.value()
-            anticipo = self.anticipo.value()
-            self.restante_label.setText(f"Restante: ${max(total - anticipo, 0):.2f}")
+            restante = max(total - self.anticipo.value(), 0)
+            self.restante_label.setText(f"Restante: ${restante:.2f}")
 
     def save_layaway(self):
         try:
@@ -913,10 +722,9 @@ class LayawayDialog(QDialog):
             total = self.current_item["precio"] * cantidad
             anticipo = self.anticipo.value()
             
-            if anticipo < total * 0.20:  # Mínimo 20% de anticipo
+            if anticipo < total * 0.20:
                 raise ValueError("El anticipo debe ser al menos el 20% del total")
             
-            # Usar with para ambas conexiones
             with sqlite3.connect("db/store.db") as conn_store, \
                  sqlite3.connect("db/movements.db") as conn_movements:
                 
@@ -938,13 +746,12 @@ class LayawayDialog(QDialog):
                 # Registrar apartado
                 cursor_movements.execute("""
                     INSERT INTO apartados (
-                        fecha_creacion, fecha_limite,
+                        fecha_limite,
                         cliente_nombre, cliente_telefono, cliente_correo,
                         articulo_id, articulo_nombre, cantidad,
                         precio_total, anticipo, restante,
                         estado, usuario_id, notas
                     ) VALUES (
-                        CURRENT_TIMESTAMP,
                         date('now', '+30 days'),
                         ?, ?, ?, ?, ?, ?, ?, ?, ?,
                         'pendiente', ?, ?
@@ -970,79 +777,88 @@ class LayawayDialog(QDialog):
                     WHERE id = ?
                 """, (cantidad, self.current_item["id"]))
                 
-                # Los commits se hacen automáticamente al salir del with
-                
-                QMessageBox.information(
-                    self, 
-                    "Éxito", 
-                    f"Apartado registrado correctamente\n"
-                    f"Stock actualizado: {stock_actual - cantidad} unidades restantes"
-                )
-                self.accept()
-                
+            QMessageBox.information(
+                self, 
+                "Éxito", 
+                f"Apartado registrado correctamente\n"
+                f"Stock actualizado: {stock_actual - cantidad} unidades restantes"
+            )
+            self.accept()
+            
         except ValueError as e:
             QMessageBox.warning(self, "Error", str(e))
         except sqlite3.Error as e:
             QMessageBox.critical(self, "Error", f"Error en la base de datos: {str(e)}")
 
-class ClientLayawaysDialog(QDialog):
-    def __init__(self, parent, telefono):
+class AddPaymentDialog(QDialog):
+    def __init__(self, apartado_id, restante, parent=None):
         super().__init__(parent)
-        self.telefono = telefono
+        self.apartado_id = apartado_id
+        self.restante = restante
         self.setup_ui()
-        self.load_layaways()
 
     def setup_ui(self):
-        self.setWindowTitle("Apartados del Cliente")
-        self.setMinimumWidth(800)
+        self.setWindowTitle("Agregar Abono")
         layout = QVBoxLayout(self)
-        
-        # Tabla de apartados
-        self.layaway_table = QTableWidget()
-        self.layaway_table.setColumnCount(8)
-        self.layaway_table.setHorizontalHeaderLabels([
-            "ID", "Artículo", "Cantidad", "Total",
-            "Anticipo", "Restante", "Estado", "Fecha Límite"
-        ])
-        header = self.layaway_table.horizontalHeader()
-        header.setSectionResizeMode(QHeaderView.ResizeToContents)
-        
-        layout.addWidget(self.layaway_table)
-        
-        # Botón cerrar
-        btn_close = QPushButton("Cerrar")
-        btn_close.clicked.connect(self.accept)
-        layout.addWidget(btn_close)
 
-    def load_layaways(self):
+        # Mostrar restante
+        layout.addWidget(QLabel(f"Restante por pagar: ${self.restante:.2f}"))
+
+        # Campo para el abono
+        form_layout = QFormLayout()
+        self.payment_input = QDoubleSpinBox()
+        self.payment_input.setMaximum(self.restante)
+        self.payment_input.setDecimals(2)
+        form_layout.addRow("Monto a abonar:", self.payment_input)
+        layout.addLayout(form_layout)
+
+        # Botones
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.Ok | QDialogButtonBox.Cancel
+        )
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def accept(self):
         try:
-            conn = sqlite3.connect("db/movements.db")
-            cursor = conn.cursor()
+            abono = self.payment_input.value()
+            if abono <= 0:
+                raise ValueError("El abono debe ser mayor a 0")
+
+            with sqlite3.connect("db/movements.db") as conn:
+                cursor = conn.cursor()
+                
+                # Actualizar el apartado
+                cursor.execute("""
+                    UPDATE apartados 
+                    SET 
+                        anticipo = anticipo + ?,
+                        restante = restante - ?,
+                        estado = CASE 
+                            WHEN restante - ? <= 0 THEN 'completado'
+                            ELSE estado 
+                        END,
+                        fecha_finalizacion = CASE 
+                            WHEN restante - ? <= 0 THEN CURRENT_TIMESTAMP
+                            ELSE fecha_finalizacion 
+                        END
+                    WHERE id = ?
+                """, (abono, abono, abono, abono, self.apartado_id))
+
+            QMessageBox.information(
+                self, 
+                "Éxito", 
+                "Abono registrado correctamente"
+            )
             
-            cursor.execute("""
-                SELECT 
-                    id, articulo_nombre, cantidad,
-                    precio_total, anticipo, restante,
-                    estado, fecha_limite
-                FROM apartados
-                WHERE cliente_telefono = ?
-                ORDER BY fecha_creacion DESC
-            """, (self.telefono,))
+            super().accept()
             
-            layaways = cursor.fetchall()
-            self.layaway_table.setRowCount(len(layaways))
-            
-            for row, layaway in enumerate(layaways):
-                for col, value in enumerate(layaway):
-                    if col in [3, 4, 5]:  # Valores monetarios
-                        text = f"${value:.2f}"
-                    else:
-                        text = str(value)
-                    item = QTableWidgetItem(text)
-                    item.setTextAlignment(Qt.AlignCenter)
-                    self.layaway_table.setItem(row, col, item)
-            
-            conn.close()
-            
+        except ValueError as e:
+            QMessageBox.warning(self, "Error", str(e))
         except sqlite3.Error as e:
-            QMessageBox.critical(self, "Error", f"Error al cargar apartados: {str(e)}") 
+            QMessageBox.critical(
+                self, 
+                "Error", 
+                f"Error en la base de datos: {str(e)}"
+            ) 

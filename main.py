@@ -4,7 +4,7 @@ from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
     QLabel, QTabWidget, QStyleFactory, QMessageBox
 )
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QFont, QPixmap
 from frontend.login_ui import LoginWindow
 from frontend.inventory_ui import InventoryApp
@@ -81,19 +81,22 @@ class MainWindow(QMainWindow):
         home_layout = QVBoxLayout(home_tab)
 
         # Pestaña de inventario
-        inventory_tab = InventoryApp(self.user_data)
+        self.inventory_tab = InventoryApp(self.user_data)
         
         # Pestaña de ventas
-        sales_tab = SalesWindow(self.user_data, self)
+        self.sales_tab = SalesWindow(self.user_data, self)
 
         # Pestaña de apartados
-        layaway_tab = LayawayWindow(self.user_data)
+        self.layaway_tab = LayawayWindow(self.user_data)
+        # Asegurarse de que la señal existe antes de conectarla
+        if hasattr(self.layaway_tab, 'inventario_actualizado'):
+            self.layaway_tab.inventario_actualizado.connect(self.inventory_tab.cargar_inventario)
 
         # Agregar pestañas
         self.tab_widget.addTab(home_tab, "Inicio")
-        self.tab_widget.addTab(inventory_tab, "Inventario")
-        self.tab_widget.addTab(sales_tab, "Ventas")
-        self.tab_widget.addTab(layaway_tab, "Apartados")
+        self.tab_widget.addTab(self.inventory_tab, "Inventario")
+        self.tab_widget.addTab(self.sales_tab, "Ventas")
+        self.tab_widget.addTab(self.layaway_tab, "Apartados")
 
         main_layout.addWidget(self.tab_widget)
 
