@@ -21,25 +21,12 @@ def reset_all_databases():
         conn_store = sqlite3.connect("db/store.db")
         cursor_store = conn_store.cursor()
         
-        # Tabla de inventario
-        cursor_store.execute("""
-        CREATE TABLE inventario (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            nombre TEXT NOT NULL,
-            descripcion TEXT,
-            cantidad INTEGER NOT NULL,
-            precio_compra REAL NOT NULL,
-            precio_venta REAL NOT NULL,
-            categoria TEXT,
-            codigo_barras TEXT UNIQUE
-        )
-        """)
+        # Eliminar tablas existentes
+        cursor_store.execute("DROP TABLE IF EXISTS usuarios")
+        cursor_store.execute("DROP TABLE IF EXISTS inventario")
+        cursor_store.execute("DROP TABLE IF EXISTS clientes")
         
-        # Tabla de usuarios
-        cursor_store.execute("""
-        DROP TABLE IF EXISTS usuarios
-        """)
-        
+        # Crear tabla usuarios
         cursor_store.execute("""
         CREATE TABLE usuarios (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -49,6 +36,35 @@ def reset_all_databases():
             rol TEXT NOT NULL,
             UNIQUE(telefono),
             UNIQUE(correo)
+        )
+        """)
+        
+        # Crear tabla inventario
+        cursor_store.execute("""
+        CREATE TABLE inventario (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nombre TEXT NOT NULL,
+            descripcion TEXT,
+            cantidad INTEGER NOT NULL,
+            precio_compra REAL NOT NULL,
+            precio_venta REAL NOT NULL,
+            categoria TEXT,
+            codigo_barras TEXT UNIQUE,
+            fecha_creacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            usuario_creacion INTEGER,
+            FOREIGN KEY (usuario_creacion) REFERENCES usuarios(id)
+        )
+        """)
+        
+        # Crear tabla clientes
+        cursor_store.execute("""
+        CREATE TABLE clientes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nombre TEXT NOT NULL,
+            telefono TEXT NOT NULL UNIQUE,
+            correo TEXT,
+            notas TEXT,
+            fecha_registro TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
         """)
         
@@ -92,41 +108,9 @@ def reset_all_databases():
         conn_movements = sqlite3.connect("db/movements.db")
         cursor_movements = conn_movements.cursor()
         
-        cursor_movements.execute("""
-        CREATE TABLE movimientos_ventas (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            usuario_id INTEGER,
-            usuario_nombre TEXT,
-            total_venta REAL NOT NULL,
-            forma_pago TEXT CHECK(forma_pago IN ('efectivo', 'tarjeta')) NOT NULL,
-            numero_articulos INTEGER NOT NULL
-        )
-        """)
-        
-        cursor_movements.execute("""
-        CREATE TABLE detalles_venta (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            movimiento_id INTEGER,
-            articulo_id INTEGER,
-            articulo_nombre TEXT,
-            cantidad INTEGER NOT NULL,
-            precio_unitario REAL NOT NULL,
-            subtotal REAL NOT NULL,
-            FOREIGN KEY (movimiento_id) REFERENCES movimientos_ventas(id)
-        )
-        """)
-        
-        cursor_movements.execute("""
-        CREATE TABLE resumen_diario (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            fecha DATE UNIQUE,
-            total_ventas REAL NOT NULL DEFAULT 0,
-            total_efectivo REAL NOT NULL DEFAULT 0,
-            total_tarjeta REAL NOT NULL DEFAULT 0,
-            numero_ventas INTEGER NOT NULL DEFAULT 0
-        )
-        """)
+        cursor_movements.execute("DROP TABLE IF EXISTS apartados")
+        cursor_movements.execute("DROP TABLE IF EXISTS movimientos_ventas")
+        cursor_movements.execute("DROP TABLE IF EXISTS detalles_venta")
         
         cursor_movements.execute("""
         CREATE TABLE apartados (
@@ -142,11 +126,33 @@ def reset_all_databases():
             precio_total REAL NOT NULL,
             anticipo REAL NOT NULL,
             restante REAL NOT NULL,
-            dias_restantes INTEGER DEFAULT 30,
-            estado TEXT CHECK(estado IN ('pendiente', 'completado', 'cancelado')) NOT NULL DEFAULT 'pendiente',
-            usuario_id INTEGER,
-            notas TEXT,
-            FOREIGN KEY (articulo_id) REFERENCES inventario(id)
+            estado TEXT NOT NULL,
+            usuario_id INTEGER NOT NULL,
+            notas TEXT
+        )
+        """)
+        
+        cursor_movements.execute("""
+        CREATE TABLE movimientos_ventas (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            tipo_movimiento TEXT NOT NULL,
+            total REAL NOT NULL,
+            metodo_pago TEXT NOT NULL,
+            usuario_id INTEGER NOT NULL,
+            notas TEXT
+        )
+        """)
+        
+        cursor_movements.execute("""
+        CREATE TABLE detalles_venta (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            venta_id INTEGER NOT NULL,
+            articulo_id INTEGER NOT NULL,
+            cantidad INTEGER NOT NULL,
+            precio_unitario REAL NOT NULL,
+            subtotal REAL NOT NULL,
+            FOREIGN KEY (venta_id) REFERENCES movimientos_ventas(id)
         )
         """)
         

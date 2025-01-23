@@ -2,11 +2,13 @@ from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, 
     QTableWidget, QTableWidgetItem, QDialog, QLineEdit, 
     QDateEdit, QSpinBox, QDoubleSpinBox, QTextEdit, QMessageBox,
-    QComboBox, QFormLayout, QGroupBox, QHeaderView, QTabWidget
+    QComboBox, QFormLayout, QGroupBox, QHeaderView, QTabWidget,
+    QFileDialog
 )
 from PyQt5.QtCore import Qt, QDate
 import sqlite3
 from datetime import datetime, timedelta
+from openpyxl import Workbook
 
 class LayawayWindow(QWidget):
     def __init__(self, user_data):
@@ -60,15 +62,20 @@ class LayawayWindow(QWidget):
         # Crear el widget de pestañas
         self.tabs = QTabWidget()
         
-        # Pestaña de Apartados
+        # Pestaña de Apartados Activos
         self.tab_apartados = QWidget()
         self.setup_apartados_tab()
-        self.tabs.addTab(self.tab_apartados, "Apartados")
+        self.tabs.addTab(self.tab_apartados, "Apartados Activos")
         
         # Pestaña de Clientes
         self.tab_clientes = QWidget()
         self.setup_clientes_tab()
         self.tabs.addTab(self.tab_clientes, "Clientes")
+        
+        # Nueva Pestaña de Historial
+        self.tab_historial = QWidget()
+        self.setup_historial_tab()
+        self.tabs.addTab(self.tab_historial, "Historial de Apartados")
         
         layout.addWidget(self.tabs)
 
@@ -148,6 +155,66 @@ class LayawayWindow(QWidget):
         layout.addLayout(action_layout)
         
         self.load_clients_table()
+
+    def setup_historial_tab(self):
+        layout = QVBoxLayout(self.tab_historial)
+        
+        # Filtros superiores
+        filter_layout = QHBoxLayout()
+        
+        # Filtro por estado
+        self.estado_combo = QComboBox()
+        self.estado_combo.addItems(["Todos", "Pagados", "Cancelados"])
+        self.estado_combo.currentTextChanged.connect(self.load_historial)
+        
+        # Filtro por fecha
+        self.fecha_desde = QDateEdit()
+        self.fecha_desde.setCalendarPopup(True)
+        self.fecha_desde.setDate(QDate.currentDate().addMonths(-1))
+        self.fecha_hasta = QDateEdit()
+        self.fecha_hasta.setCalendarPopup(True)
+        self.fecha_hasta.setDate(QDate.currentDate())
+        
+        # Búsqueda por cliente
+        self.buscar_cliente = QLineEdit()
+        self.buscar_cliente.setPlaceholderText("Buscar por cliente...")
+        self.buscar_cliente.textChanged.connect(self.filtrar_historial)
+        
+        filter_layout.addWidget(QLabel("Estado:"))
+        filter_layout.addWidget(self.estado_combo)
+        filter_layout.addWidget(QLabel("Desde:"))
+        filter_layout.addWidget(self.fecha_desde)
+        filter_layout.addWidget(QLabel("Hasta:"))
+        filter_layout.addWidget(self.fecha_hasta)
+        filter_layout.addWidget(QLabel("Cliente:"))
+        filter_layout.addWidget(self.buscar_cliente)
+        
+        btn_buscar = QPushButton("Buscar")
+        btn_buscar.clicked.connect(self.load_historial)
+        filter_layout.addWidget(btn_buscar)
+        
+        layout.addLayout(filter_layout)
+        
+        # Tabla de historial
+        self.historial_table = QTableWidget()
+        self.historial_table.setColumnCount(11)
+        self.historial_table.setHorizontalHeaderLabels([
+            "ID", "Fecha", "Cliente", "Teléfono", "Artículo",
+            "Cantidad", "Total", "Anticipo", "Monto Restante",
+            "Estado Final", "Fecha Finalización"
+        ])
+        header = self.historial_table.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.ResizeToContents)
+        
+        layout.addWidget(self.historial_table)
+        
+        # Botón para exportar
+        btn_exportar = QPushButton("Exportar a Excel")
+        btn_exportar.clicked.connect(self.exportar_historial)
+        layout.addWidget(btn_exportar)
+        
+        # Cargar datos iniciales
+        self.load_historial()
 
     def load_clients_table(self):
         try:
@@ -282,6 +349,126 @@ class LayawayWindow(QWidget):
             
         except sqlite3.Error as e:
             QMessageBox.critical(self, "Error", f"Error al cargar apartados: {str(e)}")
+
+    def load_historial(self):
+        try:
+            conn = sqlite3.connect("db/movements.db")
+            cursor = conn.cursor()
+            
+            # Construir la consulta base
+            query = """
+                SELECT 
+                    id, fecha_creacion, cliente_nombre, cliente_telefono,
+                    articulo_nombre, cantidad, precio_total, anticipo,
+                    restante, estado,
+                    CASE 
+                        WHEN estado = 'completado' THEN fecha_creacion
+                        WHEN estado = 'cancelado' THEN fecha_creacion
+                        ELSE NULL 
+                    END as fecha_finalizacion
+                FROM apartados
+                WHERE estado != 'pendiente'
+                AND fecha_creacion BETWEEN ? AND ?
+            """
+            
+            # Aplicar filtro de estado
+            estado_filtro = self.estado_combo.currentText()
+            if estado_filtro == "Pagados":
+                query += " AND estado = 'completado'"
+            elif estado_filtro == "Cancelados":
+                query += " AND estado = 'cancelado'"
+            
+            # Obtener fechas
+            fecha_desde = self.fecha_desde.date().toString("yyyy-MM-dd")
+            fecha_hasta = self.fecha_hasta.date().toString("yyyy-MM-dd")
+            
+            cursor.execute(query + " ORDER BY fecha_creacion DESC", (fecha_desde, fecha_hasta))
+            apartados = cursor.fetchall()
+            
+            self.historial_table.setRowCount(len(apartados))
+            
+            for row, apartado in enumerate(apartados):
+                for col, value in enumerate(apartado):
+                    if col in [6, 7, 8]:  # Valores monetarios
+                        text = f"${value:.2f}"
+                    elif col in [1, 10]:  # Fechas
+                        text = value.split()[0] if value else ''
+                    elif col == 9:  # Estado
+                        text = {
+                            'completado': 'Pagado',
+                            'cancelado': 'Cancelado'
+                        }.get(value, value)
+                    else:
+                        text = str(value)
+                    
+                    item = QTableWidgetItem(text)
+                    item.setTextAlignment(Qt.AlignCenter)
+                    self.historial_table.setItem(row, col, item)
+            
+            conn.close()
+            
+        except sqlite3.Error as e:
+            QMessageBox.critical(self, "Error", f"Error al cargar historial: {str(e)}")
+
+    def filtrar_historial(self):
+        texto = self.buscar_cliente.text().lower()
+        for row in range(self.historial_table.rowCount()):
+            mostrar = False
+            # Buscar en nombre y teléfono del cliente
+            for col in [2, 3]:  # Columnas de cliente y teléfono
+                item = self.historial_table.item(row, col)
+                if item and texto in item.text().lower():
+                    mostrar = True
+                    break
+            self.historial_table.setRowHidden(row, not mostrar)
+
+    def exportar_historial(self):
+        try:
+            filename, _ = QFileDialog.getSaveFileName(
+                self, 
+                "Guardar Excel", 
+                "", 
+                "Excel Files (*.xlsx)"
+            )
+            
+            if filename:
+                if not filename.endswith('.xlsx'):
+                    filename += '.xlsx'
+                
+                # Crear Excel
+                wb = Workbook()
+                ws = wb.active
+                ws.title = "Historial de Apartados"
+                
+                # Escribir encabezados
+                headers = [
+                    "ID", "Fecha", "Cliente", "Teléfono", "Artículo",
+                    "Cantidad", "Total", "Anticipo", "Monto Restante",
+                    "Estado Final", "Fecha Finalización"
+                ]
+                for col, header in enumerate(headers, 1):
+                    ws.cell(row=1, column=col, value=header)
+                
+                # Escribir datos
+                for row in range(self.historial_table.rowCount()):
+                    if not self.historial_table.isRowHidden(row):
+                        for col in range(self.historial_table.columnCount()):
+                            item = self.historial_table.item(row, col)
+                            ws.cell(row=row+2, column=col+1, value=item.text())
+                
+                wb.save(filename)
+                QMessageBox.information(
+                    self, 
+                    "Éxito", 
+                    "Historial exportado correctamente"
+                )
+                
+        except Exception as e:
+            QMessageBox.critical(
+                self, 
+                "Error", 
+                f"Error al exportar: {str(e)}"
+            )
 
 class ClientDialog(QDialog):
     def __init__(self, parent=None, client_id=None):
@@ -620,52 +807,95 @@ class LayawayDialog(QDialog):
             if anticipo < total * 0.20:  # Mínimo 20% de anticipo
                 raise ValueError("El anticipo debe ser al menos el 20% del total")
             
-            conn = sqlite3.connect("db/movements.db")
-            cursor = conn.cursor()
+            # Verificar stock disponible
+            conn_store = sqlite3.connect("db/store.db")
+            cursor_store = conn_store.cursor()
             
-            cursor.execute("""
-                INSERT INTO apartados (
-                    fecha_creacion,
-                    fecha_limite,
-                    cliente_nombre,
-                    cliente_telefono,
-                    cliente_correo,
-                    articulo_id,
-                    articulo_nombre,
+            cursor_store.execute("""
+                SELECT cantidad 
+                FROM inventario 
+                WHERE id = ?
+            """, (self.current_item["id"],))
+            
+            stock_actual = cursor_store.fetchone()[0]
+            
+            if stock_actual < cantidad:
+                conn_store.close()
+                raise ValueError(f"Stock insuficiente. Solo hay {stock_actual} unidades disponibles")
+            
+            # Iniciar transacción
+            conn_movements = sqlite3.connect("db/movements.db")
+            cursor_movements = conn_movements.cursor()
+            
+            try:
+                # 1. Registrar el apartado
+                cursor_movements.execute("""
+                    INSERT INTO apartados (
+                        fecha_creacion,
+                        fecha_limite,
+                        cliente_nombre,
+                        cliente_telefono,
+                        cliente_correo,
+                        articulo_id,
+                        articulo_nombre,
+                        cantidad,
+                        precio_total,
+                        anticipo,
+                        restante,
+                        estado,
+                        usuario_id,
+                        notas
+                    ) VALUES (
+                        CURRENT_TIMESTAMP,
+                        date('now', '+30 days'),
+                        ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                        'pendiente',
+                        ?,
+                        ?
+                    )
+                """, (
+                    self.current_client["nombre"],
+                    self.current_client["telefono"],
+                    self.current_client["correo"],
+                    self.current_item["id"],
+                    self.current_item["nombre"],
                     cantidad,
-                    precio_total,
+                    total,
                     anticipo,
-                    restante,
-                    estado,
-                    usuario_id,
-                    notas
-                ) VALUES (
-                    CURRENT_TIMESTAMP,
-                    date('now', '+30 days'),
-                    ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                    'pendiente',
-                    ?,
-                    ?
+                    total - anticipo,
+                    self.user_data['id'],
+                    self.notas.toPlainText()
+                ))
+                
+                # 2. Actualizar el inventario
+                cursor_store.execute("""
+                    UPDATE inventario 
+                    SET cantidad = cantidad - ? 
+                    WHERE id = ?
+                """, (cantidad, self.current_item["id"]))
+                
+                # Confirmar ambas transacciones
+                conn_movements.commit()
+                conn_store.commit()
+                
+                QMessageBox.information(
+                    self, 
+                    "Éxito", 
+                    f"Apartado registrado correctamente\n"
+                    f"Stock actualizado: {stock_actual - cantidad} unidades restantes"
                 )
-            """, (
-                self.current_client["nombre"],
-                self.current_client["telefono"],
-                self.current_client["correo"],
-                self.current_item["id"],
-                self.current_item["nombre"],
-                cantidad,
-                total,
-                anticipo,
-                total - anticipo,
-                self.user_data['id'],
-                self.notas.toPlainText()
-            ))
-            
-            conn.commit()
-            conn.close()
-            
-            QMessageBox.information(self, "Éxito", "Apartado registrado correctamente")
-            self.accept()
+                self.accept()
+                
+            except Exception as e:
+                # Si algo falla, revertir ambas transacciones
+                conn_movements.rollback()
+                conn_store.rollback()
+                raise e
+                
+            finally:
+                # Cerrar conexiones
+                conn_movements.close()
+                conn_store.close()
             
         except ValueError as e:
             QMessageBox.warning(self, "Error", str(e))

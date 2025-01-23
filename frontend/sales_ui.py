@@ -145,8 +145,8 @@ class SalesWindow(QMainWindow):
         self.tabla_historico = QTableWidget()
         self.tabla_historico.setColumnCount(7)
         self.tabla_historico.setHorizontalHeaderLabels([
-            "ID", "Fecha", "Usuario", "Total Venta", 
-            "Forma Pago", "Núm. Artículos", "Detalles"
+            "ID", "Fecha", "Tipo", "Total", 
+            "Método Pago", "Usuario", "Notas"
         ])
         layout.addWidget(self.tabla_historico)
 
@@ -162,47 +162,57 @@ class SalesWindow(QMainWindow):
         self.cargar_historico()
 
     def cargar_historico(self):
-        """Cargar el histórico de movimientos según las fechas seleccionadas"""
-        fecha_inicio = self.fecha_inicio.date().toPyDate()
-        fecha_fin = self.fecha_fin.date().toPyDate() + timedelta(days=1)  # Incluir el día completo
-
         try:
-            conn = sqlite3.connect("db/movements.db")
-            cursor = conn.cursor()
+            # Conectar a movements.db
+            conn_movements = sqlite3.connect("db/movements.db")
+            cursor_movements = conn_movements.cursor()
             
-            cursor.execute("""
+            # Obtener las ventas
+            cursor_movements.execute("""
                 SELECT 
-                    id, fecha, usuario_nombre, total_venta,
-                    forma_pago, numero_articulos
+                    id,
+                    fecha,
+                    tipo_movimiento,
+                    total,
+                    metodo_pago,
+                    usuario_id,
+                    notas
                 FROM movimientos_ventas
-                WHERE fecha BETWEEN ? AND ?
                 ORDER BY fecha DESC
-            """, (fecha_inicio, fecha_fin))
+            """)
             
-            movimientos = cursor.fetchall()
+            ventas = cursor_movements.fetchall()
             
-            self.tabla_historico.setRowCount(len(movimientos))
-            total_periodo = 0
+            # Conectar a store.db para obtener información de usuarios
+            conn_store = sqlite3.connect("db/store.db")
+            cursor_store = conn_store.cursor()
             
-            for row, mov in enumerate(movimientos):
-                for col, valor in enumerate(mov):
-                    if col == 3:  # Total venta
+            # Obtener diccionario de usuarios
+            cursor_store.execute("SELECT id, telefono FROM usuarios")
+            usuarios = dict(cursor_store.fetchall())
+            
+            # Llenar la tabla
+            self.tabla_historico.setRowCount(len(ventas))
+            
+            for row, venta in enumerate(ventas):
+                # Convertir la venta a lista para poder modificar el usuario_id por el teléfono
+                venta = list(venta)
+                # Reemplazar usuario_id por teléfono del usuario
+                venta[5] = usuarios.get(venta[5], "Usuario Desconocido")
+                
+                for col, valor in enumerate(venta):
+                    if col == 3:  # Columna del total
                         texto = f"${valor:.2f}"
-                        total_periodo += valor
+                    elif col == 1:  # Columna de fecha
+                        texto = valor.split()[0] if valor else ''
                     else:
                         texto = str(valor)
-                    self.tabla_historico.setItem(row, col, QTableWidgetItem(texto))
-                
-                # Agregar botón de detalles
-                btn_detalles = QPushButton("Ver Detalles")
-                btn_detalles.clicked.connect(lambda checked, x=mov[0]: self.mostrar_detalles_venta(x))
-                self.tabla_historico.setCellWidget(row, 6, btn_detalles)
+                    item = QTableWidgetItem(texto)
+                    item.setTextAlignment(Qt.AlignCenter)
+                    self.tabla_historico.setItem(row, col, item)
             
-            # Actualizar resumen
-            self.lbl_total_periodo.setText(f"Total del período: ${total_periodo:.2f}")
-            self.lbl_num_ventas.setText(f"Número de ventas: {len(movimientos)}")
-            
-            conn.close()
+            conn_movements.close()
+            conn_store.close()
             
         except sqlite3.Error as e:
             QMessageBox.critical(self, "Error", f"Error al cargar el histórico: {str(e)}")

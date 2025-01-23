@@ -1,16 +1,14 @@
 import sys
 import os
-
-# Agrega la carpeta raíz del proyecto al PATH
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QVBoxLayout, QHBoxLayout, QTableWidget,
-    QTableWidgetItem, QPushButton, QLineEdit, QLabel, QWidget, QMessageBox, QHeaderView, QFrame
+    QTableWidgetItem, QPushButton, QLineEdit, QLabel, QWidget, QMessageBox, 
+    QHeaderView, QFrame, QGroupBox, QFormLayout, QSpinBox, QDoubleSpinBox,
+    QTextEdit, QComboBox, QDateEdit, QFileDialog, QTabWidget
 )
 from PyQt5.QtGui import QPalette, QColor
-from PyQt5.QtCore import Qt
-
+from PyQt5.QtCore import Qt, QDate
+from openpyxl import Workbook
 import sqlite3
 from utils.barcode_utils import generar_codigo_desde_db, imprimir_codigo_barras
 
@@ -24,90 +22,287 @@ class InventoryApp(QWidget):
 
     def setup_ui(self):
         layout = QVBoxLayout(self)
-        layout.setSpacing(20)
-        layout.setContentsMargins(20, 20, 20, 20)
-
-        # Título de la sección
-        title = QLabel("Gestión de Inventario")
-        title.setObjectName("title")
-        title.setAlignment(Qt.AlignCenter)
-        layout.addWidget(title)
-
-        # Marco para el formulario
-        form_frame = QFrame()
-        form_frame.setObjectName("form_frame")
-        form_frame.setStyleSheet("""
-            QFrame#form_frame {
-                background-color: #FFF0F3;
-                border-radius: 8px;
-                padding: 10px;
-            }
-        """)
-        form_layout = QHBoxLayout(form_frame)
-        form_layout.setSpacing(15)
-
-        # Campos de entrada con estilo
-        input_fields = [
-            ("Nombre:", self.create_input("Nombre del artículo")),
-            ("Descripción:", self.create_input("Descripción")),
-            ("Cantidad:", self.create_input("Cantidad")),
-            ("Valor Real:", self.create_input("Valor Real")),
-            ("Valor Venta:", self.create_input("Valor Venta"))
-        ]
-
-        self.input_widgets = {}  # Para almacenar las referencias
         
-        for label_text, input_widget in input_fields:
-            field_layout = QVBoxLayout()
-            label = QLabel(label_text)
-            field_layout.addWidget(label)
-            field_layout.addWidget(input_widget)
-            form_layout.addLayout(field_layout)
-            self.input_widgets[label_text] = input_widget
+        # Crear el widget de pestañas
+        self.tabs = QTabWidget()
+        
+        # Pestaña de Inventario Activo
+        self.tab_inventario = QWidget()
+        self.setup_inventario_tab()
+        self.tabs.addTab(self.tab_inventario, "Inventario Activo")
+        
+        # Pestaña de Historial
+        self.tab_historial = QWidget()
+        self.setup_historial_tab()
+        self.tabs.addTab(self.tab_historial, "Historial de Inventario")
+        
+        layout.addWidget(self.tabs)
 
-        # Botón agregar con estilo
-        self.btn_agregar = QPushButton("Agregar Artículo")
-        self.btn_agregar.setMinimumWidth(120)
-        self.btn_agregar.clicked.connect(self.agregar_articulo)
-        form_layout.addWidget(self.btn_agregar)
-
-        layout.addWidget(form_frame)
-
-        # Tabla de inventario con estilo
+    def setup_inventario_tab(self):
+        layout = QVBoxLayout(self.tab_inventario)
+        
+        # Botones y campos existentes
+        input_layout = QHBoxLayout()
+        self.input_widgets = {}
+        
+        for label in ["Nombre:", "Descripción:", "Cantidad:", 
+                     "Valor Real:", "Valor Venta:", "Categoría:", 
+                     "Código de Barras:"]:
+            input_group = QVBoxLayout()
+            input_group.addWidget(QLabel(label))
+            input_widget = QLineEdit()
+            input_group.addWidget(input_widget)
+            self.input_widgets[label] = input_widget
+            input_layout.addLayout(input_group)
+        
+        layout.addLayout(input_layout)
+        
+        button_layout = QHBoxLayout()
+        btn_agregar = QPushButton("Agregar Artículo")
+        btn_agregar.clicked.connect(self.agregar_articulo)
+        button_layout.addWidget(btn_agregar)
+        
+        layout.addLayout(button_layout)
+        
+        # Tabla de inventario activo
         self.tabla_inventario = QTableWidget()
-        self.tabla_inventario.setColumnCount(6)
+        self.tabla_inventario.setColumnCount(10)
         self.tabla_inventario.setHorizontalHeaderLabels([
-            "ID", "Nombre", "Descripción", "Cantidad", 
-            "Valor Real", "Valor Venta"
+            "ID", "Nombre", "Descripción", "Cantidad",
+            "Precio Compra", "Precio Venta", "Categoría",
+            "Código Barras", "Fecha Creación", "Creado por"
         ])
         
-        # Configurar la tabla
         header = self.tabla_inventario.horizontalHeader()
-        header.setSectionResizeMode(QHeaderView.Stretch)
-        self.tabla_inventario.verticalHeader().setVisible(False)
-        self.tabla_inventario.setAlternatingRowColors(True)
-        
+        header.setSectionResizeMode(QHeaderView.ResizeToContents)
         layout.addWidget(self.tabla_inventario)
+        
+        self.cargar_inventario()
 
-    def create_input(self, placeholder):
-        input_widget = QLineEdit()
-        input_widget.setPlaceholderText(placeholder)
-        return input_widget
+    def setup_historial_tab(self):
+        layout = QVBoxLayout(self.tab_historial)
+        
+        # Filtros superiores
+        filter_layout = QHBoxLayout()
+        
+        # Filtro por fecha
+        self.fecha_desde = QDateEdit()
+        self.fecha_desde.setCalendarPopup(True)
+        self.fecha_desde.setDate(QDate.currentDate().addMonths(-1))
+        
+        self.fecha_hasta = QDateEdit()
+        self.fecha_hasta.setCalendarPopup(True)
+        self.fecha_hasta.setDate(QDate.currentDate())
+        
+        # Búsqueda
+        self.buscar_articulo = QLineEdit()
+        self.buscar_articulo.setPlaceholderText("Buscar por nombre o descripción...")
+        self.buscar_articulo.textChanged.connect(self.filtrar_historial)
+        
+        # Filtro por categoría
+        self.categoria_combo = QComboBox()
+        self.categoria_combo.addItem("Todas las categorías")
+        
+        filter_layout.addWidget(QLabel("Desde:"))
+        filter_layout.addWidget(self.fecha_desde)
+        filter_layout.addWidget(QLabel("Hasta:"))
+        filter_layout.addWidget(self.fecha_hasta)
+        filter_layout.addWidget(QLabel("Categoría:"))
+        filter_layout.addWidget(self.categoria_combo)
+        filter_layout.addWidget(self.buscar_articulo)
+        
+        btn_buscar = QPushButton("Buscar")
+        btn_buscar.clicked.connect(self.cargar_historial)
+        filter_layout.addWidget(btn_buscar)
+        
+        layout.addLayout(filter_layout)
+        
+        # Tabla de historial
+        self.historial_table = QTableWidget()
+        self.historial_table.setColumnCount(11)
+        self.historial_table.setHorizontalHeaderLabels([
+            "ID", "Nombre", "Descripción", "Stock Inicial",
+            "Precio Compra", "Precio Venta", "Categoría",
+            "Código Barras", "Fecha Creación", "Creado por",
+            "Estado Actual"
+        ])
+        
+        header = self.historial_table.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.ResizeToContents)
+        layout.addWidget(self.historial_table)
+        
+        # Botón exportar
+        btn_exportar = QPushButton("Exportar a Excel")
+        btn_exportar.clicked.connect(self.exportar_historial)
+        layout.addWidget(btn_exportar)
+        
+        # Cargar datos iniciales
+        self.cargar_categorias()
+        self.cargar_historial()
+
+    def cargar_categorias(self):
+        try:
+            conn = sqlite3.connect("db/store.db")
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                SELECT DISTINCT categoria 
+                FROM inventario 
+                WHERE categoria IS NOT NULL 
+                AND categoria != ''
+            """)
+            
+            categorias = cursor.fetchall()
+            self.categoria_combo.clear()
+            self.categoria_combo.addItem("Todas las categorías")
+            
+            for categoria in categorias:
+                self.categoria_combo.addItem(categoria[0])
+            
+            conn.close()
+            
+        except sqlite3.Error as e:
+            QMessageBox.critical(self, "Error", f"Error al cargar categorías: {str(e)}")
+
+    def cargar_historial(self):
+        try:
+            conn = sqlite3.connect("db/store.db")
+            cursor = conn.cursor()
+            
+            query = """
+                SELECT 
+                    i.id, i.nombre, i.descripcion, i.cantidad,
+                    i.precio_compra, i.precio_venta, i.categoria,
+                    i.codigo_barras, i.fecha_creacion,
+                    COALESCE(u.telefono, 'Sistema') as creador,
+                    CASE 
+                        WHEN i.cantidad > 0 THEN 'En Stock'
+                        ELSE 'Sin Stock'
+                    END as estado
+                FROM inventario i
+                LEFT JOIN usuarios u ON i.usuario_creacion = u.id
+                WHERE i.fecha_creacion BETWEEN ? AND ?
+            """
+            
+            params = [
+                self.fecha_desde.date().toString("yyyy-MM-dd"),
+                self.fecha_hasta.date().toString("yyyy-MM-dd")
+            ]
+            
+            # Filtrar por categoría si se seleccionó una
+            categoria = self.categoria_combo.currentText()
+            if categoria != "Todas las categorías":
+                query += " AND i.categoria = ?"
+                params.append(categoria)
+            
+            cursor.execute(query + " ORDER BY i.fecha_creacion DESC", params)
+            items = cursor.fetchall()
+            
+            self.historial_table.setRowCount(len(items))
+            
+            for row, item in enumerate(items):
+                for col, value in enumerate(item):
+                    if col in [4, 5]:  # Valores monetarios
+                        text = f"${value:.2f}"
+                    elif col == 8:  # Fecha
+                        text = value.split()[0] if value else ''
+                    else:
+                        text = str(value)
+                    table_item = QTableWidgetItem(text)
+                    table_item.setTextAlignment(Qt.AlignCenter)
+                    self.historial_table.setItem(row, col, table_item)
+            
+            conn.close()
+            
+        except sqlite3.Error as e:
+            QMessageBox.critical(self, "Error", f"Error al cargar historial: {str(e)}")
+
+    def filtrar_historial(self):
+        texto = self.buscar_articulo.text().lower()
+        for row in range(self.historial_table.rowCount()):
+            mostrar = False
+            # Buscar en nombre y descripción
+            for col in [1, 2]:  # Columnas de nombre y descripción
+                item = self.historial_table.item(row, col)
+                if item and texto in item.text().lower():
+                    mostrar = True
+                    break
+            self.historial_table.setRowHidden(row, not mostrar)
+
+    def exportar_historial(self):
+        try:
+            filename, _ = QFileDialog.getSaveFileName(
+                self, 
+                "Guardar Excel", 
+                "", 
+                "Excel Files (*.xlsx)"
+            )
+            
+            if filename:
+                if not filename.endswith('.xlsx'):
+                    filename += '.xlsx'
+                
+                wb = Workbook()
+                ws = wb.active
+                ws.title = "Historial de Inventario"
+                
+                # Escribir encabezados
+                headers = [
+                    "ID", "Nombre", "Descripción", "Stock Inicial",
+                    "Precio Compra", "Precio Venta", "Categoría",
+                    "Código Barras", "Fecha Creación", "Creado por",
+                    "Estado Actual"
+                ]
+                for col, header in enumerate(headers, 1):
+                    ws.cell(row=1, column=col, value=header)
+                
+                # Escribir datos
+                for row in range(self.historial_table.rowCount()):
+                    if not self.historial_table.isRowHidden(row):
+                        for col in range(self.historial_table.columnCount()):
+                            item = self.historial_table.item(row, col)
+                            ws.cell(row=row+2, column=col+1, value=item.text())
+                
+                wb.save(filename)
+                QMessageBox.information(
+                    self, 
+                    "Éxito", 
+                    "Historial exportado correctamente"
+                )
+                
+        except Exception as e:
+            QMessageBox.critical(
+                self, 
+                "Error", 
+                f"Error al exportar: {str(e)}"
+            )
 
     def cargar_inventario(self):
-        """Cargar datos del inventario en la tabla."""
         try:
-            conn = sqlite3.connect("db/store.db")  # Cambiado a store.db
+            conn = sqlite3.connect("db/store.db")
             cursor = conn.cursor()
-            cursor.execute("SELECT * FROM inventario")
-            datos = cursor.fetchall()
             
+            # Consulta con JOIN para obtener el nombre del usuario
+            cursor.execute("""
+                SELECT 
+                    i.id, i.nombre, i.descripcion, i.cantidad,
+                    i.precio_compra, i.precio_venta, i.categoria,
+                    i.codigo_barras, i.fecha_creacion,
+                    COALESCE(u.telefono, 'Sistema') as creador
+                FROM inventario i
+                LEFT JOIN usuarios u ON i.usuario_creacion = u.id
+                ORDER BY i.id
+            """)
+            
+            datos = cursor.fetchall()
             self.tabla_inventario.setRowCount(len(datos))
             
             for row, dato in enumerate(datos):
                 for col, valor in enumerate(dato):
                     if col in [4, 5]:  # Valores monetarios
                         texto = f"${valor:.2f}"
+                    elif col == 8:  # Fecha de creación
+                        texto = valor.split()[0] if valor else ''  # Solo la fecha, sin hora
                     else:
                         texto = str(valor)
                     item = QTableWidgetItem(texto)
@@ -127,6 +322,8 @@ class InventoryApp(QWidget):
             cantidad = self.input_widgets["Cantidad:"].text()
             valor_real = self.input_widgets["Valor Real:"].text()
             valor_venta = self.input_widgets["Valor Venta:"].text()
+            categoria = self.input_widgets["Categoría:"].text().strip()
+            codigo_barras = self.input_widgets["Código de Barras:"].text().strip()
 
             # Validaciones
             if not nombre:
@@ -142,21 +339,30 @@ class InventoryApp(QWidget):
                 raise ValueError("Los valores deben ser números positivos")
 
             # Insertar en la base de datos
-            conn = sqlite3.connect("db/store.db")  # Cambiado a store.db
+            conn = sqlite3.connect("db/store.db")
             cursor = conn.cursor()
+            
             cursor.execute("""
-                INSERT INTO inventario (nombre, descripcion, cantidad, precio_compra, precio_venta)
-                VALUES (?, ?, ?, ?, ?)
-            """, (nombre, descripcion, int(cantidad), valor_real, valor_venta))
+                INSERT INTO inventario (
+                    nombre, descripcion, cantidad, 
+                    precio_compra, precio_venta, 
+                    categoria, codigo_barras,
+                    usuario_creacion
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                nombre, descripcion, int(cantidad),
+                valor_real, valor_venta,
+                categoria, codigo_barras,
+                self.user_data['id']  # ID del usuario actual
+            ))
             
             conn.commit()
             conn.close()
             
-            # Limpiar campos
+            # Limpiar campos y recargar tabla
             for input_widget in self.input_widgets.values():
                 input_widget.clear()
             
-            # Recargar tabla
             self.cargar_inventario()
             
             QMessageBox.information(self, "Éxito", "Artículo agregado correctamente")
