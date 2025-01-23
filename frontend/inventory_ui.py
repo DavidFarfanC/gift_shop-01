@@ -301,7 +301,7 @@ class InventoryApp(QMainWindow):
 
     def abrir_ventas(self):
         from frontend.sales_ui import SalesWindow
-        self.ventana_ventas = SalesWindow(self.user_data)
+        self.ventana_ventas = SalesWindow(user_data=self.user_data, parent=self)
         self.ventana_ventas.show()
 
 

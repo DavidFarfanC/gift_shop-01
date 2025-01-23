@@ -8,9 +8,10 @@ import sqlite3
 from datetime import datetime, timedelta
 
 class SalesWindow(QMainWindow):
-    def __init__(self, user_data):
-        super().__init__()
+    def __init__(self, user_data, parent=None):
+        super().__init__(parent)
         self.user_data = user_data
+        self.parent = parent
         self.setWindowTitle("Sistema de Ventas")
         self.setGeometry(150, 150, 1000, 700)
 
