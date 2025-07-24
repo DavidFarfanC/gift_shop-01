@@ -1,0 +1,13 @@
+# Archivos del sistema
+*.log
+*.db
+__pycache__/
+.vscode/
+
+# Archivos de Windows
+Thumbs.db
+Desktop.ini
+
+# Bases de datos y logs específicos de tu proyecto
+/assets/db/*.db
+gift_shop_log.txt

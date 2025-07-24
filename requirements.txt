@@ -1,0 +1,12 @@
+# Lista de dependencias para Gift Shop Management System
+# Solo nombres de paquetes, sin versiones
+
+PyQt5
+python-barcode
+Pillow
+openpyxl
+pandas
+setuptools
+platformdirs
+jaraco.text
+packaging
